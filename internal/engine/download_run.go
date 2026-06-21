@@ -137,7 +137,15 @@ func (e *Engine) transfer(ctx context.Context, dl *Download, fresh bool) (*Downl
 	e.observeStart(dl.ID, prog)
 	defer e.observeStop(dl.ID)
 
-	runErr := e.runSegments(ctx, dl, part, prog)
+	// Per-download bandwidth cap: one bucket shared by this download's segments,
+	// independent of the engine-wide globalLimiter. nil (no cap) is a true no-op at
+	// the flush boundary. Built here, threaded down exactly like prog.
+	var limiter *rateLimiter
+	if rate := int64(e.cfg.PerDownloadMaxRate); rate > 0 {
+		limiter = newRateLimiter(rate, rateBurst(rate, e.bufSize(), int64(e.cfg.RateBurst)))
+	}
+
+	runErr := e.runSegments(ctx, dl, part, prog, limiter)
 
 	if runErr != nil {
 		_ = part.Close()
@@ -345,23 +353,23 @@ func repairLayout(dl *Download) {
 // it dispatches to the static fan-out or the work-stealing pool per config. After a
 // clean run it asserts every ranged segment is fully backed (and the bytes sum to a
 // known TotalSize) so no truncated .part is ever renamed.
-func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
+func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
 	// Single open-ended segment: unknown size or no range support.
 	if len(dl.Segments) == 1 && dl.Segments[0].End < 0 {
 		runCtx, cancel := context.WithCancelCause(ctx)
 		defer cancel(nil)
-		return e.runWholeBody(runCtx, dl, part, prog)
+		return e.runWholeBody(runCtx, dl, part, prog, limiter)
 	}
 	if e.cfg.WorkStealing {
-		return e.runStealing(ctx, dl, part, prog)
+		return e.runStealing(ctx, dl, part, prog, limiter)
 	}
-	return e.runStatic(ctx, dl, part, prog)
+	return e.runStatic(ctx, dl, part, prog, limiter)
 }
 
 // runStatic is the fixed segmentation: one goroutine per incomplete segment,
 // bounded by SegmentsPerDownload, ranges immutable for the run. On any error all
 // siblings are cancelled via the cause context.
-func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
+func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
@@ -397,7 +405,7 @@ func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, pro
 		go func(idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := e.runSegment(runCtx, dl, idx, part, prog, nil); err != nil {
+			if err := e.runSegment(runCtx, dl, idx, part, prog, nil, limiter); err != nil {
 				fail(err)
 			}
 		}(i) // nil coord: static, immutable ranges
@@ -423,7 +431,7 @@ func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, pro
 // pre-sized to the slot ceiling so a steal never reallocates the arrays the
 // Manager's observer reads. After the pool drains, the durable segment slice is
 // rebuilt from the final layout for the completeness gate and the persisted record.
-func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
+func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
@@ -460,7 +468,7 @@ func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, p
 					_ = e.store.UpdateSegment(runCtx, dl.ID, steal.donor)
 					_ = e.store.UpdateSegment(runCtx, dl.ID, steal.tail)
 				}
-				if err := e.runSegment(runCtx, dl, idx, part, prog, coord); err != nil {
+				if err := e.runSegment(runCtx, dl, idx, part, prog, coord, limiter); err != nil {
 					fail(err)
 					return
 				}

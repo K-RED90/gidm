@@ -44,6 +44,15 @@ type Download struct {
 	WorkStealing bool `toml:"work_stealing"`
 	MaxSegments  int  `toml:"max_segments"`
 	MinStealSize int  `toml:"min_steal_size"`
+
+	// MaxRate caps total download bandwidth across all downloads (bytes/sec); 0 =
+	// unlimited. PerDownloadMaxRate caps each individual download the same way.
+	// RateBurst overrides the token-bucket capacity (bytes); 0 derives it from the
+	// rate. A configured burst is floored so it is never below BufferSize — a smaller
+	// burst could never admit one buffer flush and would stall a worker.
+	MaxRate            int `toml:"max_rate"`
+	PerDownloadMaxRate int `toml:"per_download_max_rate"`
+	RateBurst          int `toml:"rate_burst"`
 }
 
 type Network struct {
@@ -200,6 +209,9 @@ func applyEnv(c *Config) error {
 	boolean("GIDM_DOWNLOAD_WORK_STEALING", &c.Download.WorkStealing)
 	num("GIDM_DOWNLOAD_MAX_SEGMENTS", &c.Download.MaxSegments)
 	num("GIDM_DOWNLOAD_MIN_STEAL_SIZE", &c.Download.MinStealSize)
+	num("GIDM_DOWNLOAD_MAX_RATE", &c.Download.MaxRate)
+	num("GIDM_DOWNLOAD_PER_DOWNLOAD_MAX_RATE", &c.Download.PerDownloadMaxRate)
+	num("GIDM_DOWNLOAD_RATE_BURST", &c.Download.RateBurst)
 
 	str("GIDM_NETWORK_PROXY_URL", &c.Network.ProxyURL)
 	str("GIDM_NETWORK_USER_AGENT", &c.Network.UserAgent)
@@ -262,6 +274,18 @@ func (c *Config) Validate() error {
 		if c.Download.MinStealSize < 1 {
 			errs = append(errs, errors.New("download.min_steal_size must be >= 1 when work_stealing is enabled"))
 		}
+	}
+	if c.Download.MaxRate < 0 {
+		errs = append(errs, errors.New("download.max_rate must be >= 0"))
+	}
+	if c.Download.PerDownloadMaxRate < 0 {
+		errs = append(errs, errors.New("download.per_download_max_rate must be >= 0"))
+	}
+	if c.Download.RateBurst < 0 {
+		errs = append(errs, errors.New("download.rate_burst must be >= 0"))
+	}
+	if c.Download.RateBurst > 0 && c.Download.RateBurst < c.Download.BufferSize {
+		errs = append(errs, errors.New("download.rate_burst must be >= download.buffer_size (a smaller burst can never admit one buffer)"))
 	}
 	if c.Daemon.ReadTimeout <= 0 {
 		errs = append(errs, errors.New("daemon.read_timeout must be > 0"))
