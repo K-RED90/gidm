@@ -16,6 +16,9 @@ coverage.txt
 *.db
 *.sock
 
+# Claude Code personal settings (workflows under .claude/workflows/ are shared)
+.claude/settings.local.json
+
 # OS / editor
 .DS_Store
 *.swp
