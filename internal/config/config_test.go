@@ -265,3 +265,56 @@ func TestDaemonTunablesValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestRateLimitDefaultsUnlimited(t *testing.T) {
+	c := Default()
+	if c.Download.MaxRate != 0 || c.Download.PerDownloadMaxRate != 0 || c.Download.RateBurst != 0 {
+		t.Errorf("rate defaults = (%d, %d, %d), want all 0 (unlimited)",
+			c.Download.MaxRate, c.Download.PerDownloadMaxRate, c.Download.RateBurst)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("default (unlimited) rate config is invalid: %v", err)
+	}
+}
+
+func TestRateLimitLayering(t *testing.T) {
+	path := writeTempConfig(t, "[download]\nmax_rate = 1048576\nper_download_max_rate = 524288\n")
+	t.Setenv("GIDM_CONFIG", path)
+	t.Setenv("GIDM_DOWNLOAD_MAX_RATE", "2097152") // env overrides file
+	t.Setenv("GIDM_DOWNLOAD_RATE_BURST", "131072")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Download.MaxRate != 2097152 {
+		t.Errorf("max_rate = %d, want 2097152 (env over file)", c.Download.MaxRate)
+	}
+	if c.Download.PerDownloadMaxRate != 524288 {
+		t.Errorf("per_download_max_rate = %d, want 524288 (from file)", c.Download.PerDownloadMaxRate)
+	}
+	if c.Download.RateBurst != 131072 {
+		t.Errorf("rate_burst = %d, want 131072 (from env)", c.Download.RateBurst)
+	}
+}
+
+func TestRateLimitValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"max_rate < 0", func(c *Config) { c.Download.MaxRate = -1 }},
+		{"per_download_max_rate < 0", func(c *Config) { c.Download.PerDownloadMaxRate = -1 }},
+		{"rate_burst < 0", func(c *Config) { c.Download.RateBurst = -1 }},
+		{"rate_burst below buffer_size", func(c *Config) { c.Download.RateBurst = c.Download.BufferSize - 1 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			tc.mutate(c)
+			if err := c.Validate(); err == nil {
+				t.Fatalf("Validate: expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}

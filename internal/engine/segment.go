@@ -30,7 +30,7 @@ const checkpointInterval = time.Second
 // which rules out a steal that was tentatively shrunk then undone; an undone steal
 // restores the End and the loop re-fetches the remainder. coord is nil for the
 // static and whole-body paths, where the segment's bounds are the immutable record.
-func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord) error {
+func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord, limiter *rateLimiter) error {
 	var plan *livePlan
 	if coord != nil {
 		plan = coord.plan
@@ -70,7 +70,7 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 			continue
 		}
 
-		err = e.streamInto(ctx, body, part, from, dl, idx, prog, plan, start, buf)
+		err = e.streamInto(ctx, body, part, from, dl, idx, prog, plan, start, buf, limiter)
 		_ = body.Close()
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -136,7 +136,7 @@ func isDone(seg Segment, completed int64) bool {
 // Without an End there is no resume; a mid-stream failure restarts from 0 within
 // the retry budget. prog index 0 tracks bytes written so the terminal persist
 // reflects real progress.
-func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
+func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
 	bufp := e.bufPool.Get().(*[]byte)
 	defer e.bufPool.Put(bufp)
 	buf := *bufp
@@ -169,7 +169,7 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 			continue
 		}
 
-		err = e.streamInto(ctx, body, part, 0, dl, 0, prog, nil, 0, buf)
+		err = e.streamInto(ctx, body, part, 0, dl, 0, prog, nil, 0, buf, limiter)
 		_ = body.Close()
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -200,21 +200,23 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 // ranged segment, or 0 for the whole-body fallback. plan/segStart are the
 // work-stealing handles (nil/0 on the static and whole-body paths). The copy runs
 // in copySegment so the zero-alloc benchmark covers the exact hot-path call.
-func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte) error {
+func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte, limiter *rateLimiter) error {
 	startCompleted := prog.load(idx)
 
 	tracked := &progressWriter{
-		dst:        &offsetWriter{f: part, off: baseOff},
-		ctx:        ctx,
-		prog:       prog,
-		segs:       dl.Segments,
-		plan:       plan,
-		start:      segStart,
-		idx:        idx,
-		base:       startCompleted,
-		store:      e.store,
-		downloadID: dl.ID,
-		nextFlush:  time.Now().Add(checkpointInterval),
+		dst:           &offsetWriter{f: part, off: baseOff},
+		ctx:           ctx,
+		limiter:       limiter,
+		globalLimiter: e.globalLimiter,
+		prog:          prog,
+		segs:          dl.Segments,
+		plan:          plan,
+		start:         segStart,
+		idx:           idx,
+		base:          startCompleted,
+		store:         e.store,
+		downloadID:    dl.ID,
+		nextFlush:     time.Now().Add(checkpointInterval),
 	}
 
 	_, err := copySegment(tracked, body, buf)
@@ -229,7 +231,14 @@ func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, 
 type progressWriter struct {
 	dst io.Writer
 
-	ctx        context.Context
+	ctx context.Context
+
+	// limiter (per-download) and globalLimiter (engine-wide) throttle each flush at
+	// the buffer boundary. Either or both may be nil (no cap), in which case Write
+	// takes the un-throttled code path with no lock and no allocation.
+	limiter       *rateLimiter
+	globalLimiter *rateLimiter
+
 	prog       *segProgress
 	segs       []Segment // durable shape, used only when plan == nil
 	plan       *livePlan // live End source for a work-stealing run; nil otherwise
@@ -243,6 +252,26 @@ type progressWriter struct {
 }
 
 func (p *progressWriter) Write(b []byte) (int, error) {
+	// Bandwidth admission at the flush boundary (off the per-byte path): gate len(b),
+	// the bytes pulled off the wire this flush, through the per-download then the
+	// global bucket. The combined nil-check keeps the uncapped path byte-for-byte the
+	// un-throttled code — no lock, no alloc. WaitN honors ctx, so a paused/cancelled
+	// transfer aborts here instead of holding tokens. On a steal-clip below we admit
+	// len(b) but write only room; the over-count is bounded by one buffer per (rare)
+	// steal and is not refunded — the bytes were already read from the body.
+	if p.limiter != nil || p.globalLimiter != nil {
+		if p.limiter != nil {
+			if err := p.limiter.WaitN(p.ctx, len(b)); err != nil {
+				return 0, err
+			}
+		}
+		if p.globalLimiter != nil {
+			if err := p.globalLimiter.WaitN(p.ctx, len(b)); err != nil {
+				return 0, err
+			}
+		}
+	}
+
 	if p.plan != nil {
 		// Re-read the live End at this flush boundary (off the per-byte path). A
 		// steal may have shrunk it; clip so this worker never writes into the

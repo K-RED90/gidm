@@ -24,6 +24,12 @@ type Engine struct {
 	// bufPool hands out reusable transfer buffers sized cfg.BufferSize. Pooling
 	// keeps the per-chunk copy loop allocation-free (CLAUDE.md principle 2).
 	bufPool sync.Pool
+
+	// globalLimiter caps total bandwidth across every segment of every download.
+	// nil when no global cap is configured, in which case the flush boundary takes
+	// no lock and allocates nothing. Engine-scoped (like store), so it is read here
+	// rather than threaded through the run; the per-download cap is threaded instead.
+	globalLimiter *rateLimiter
 }
 
 // New builds an Engine from the resolved config, an HTTP fetcher, and a store.
@@ -44,7 +50,20 @@ func New(cfg config.Config, fetcher Fetcher, store Store) *Engine {
 		b := make([]byte, bufSize)
 		return &b
 	}
+	if rate := int64(cfg.Download.MaxRate); rate > 0 {
+		e.globalLimiter = newRateLimiter(rate, rateBurst(rate, bufSize, int64(cfg.Download.RateBurst)))
+	}
 	return e
+}
+
+// bufSize reports the effective transfer-buffer size, matching New's flooring. It
+// is the upper bound on a single flush, so the rate limiter's burst is floored to a
+// multiple of it (see rateBurst).
+func (e *Engine) bufSize() int {
+	if e.cfg.BufferSize < 1 {
+		return defaultBufferSize
+	}
+	return e.cfg.BufferSize
 }
 
 // Ready reports whether the engine is wired enough to run. Per-download fan-out

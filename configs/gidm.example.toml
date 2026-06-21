@@ -15,6 +15,9 @@ retry_backoff         = "2s"    # base backoff, grows exponentially
 work_stealing         = true    # fast workers absorb a straggler's tail by splitting it mid-flight
 max_segments          = 64      # ceiling on live segments after work-stealing splits
 min_steal_size        = 1048576 # don't split a remainder below this many bytes (1 MiB)
+max_rate              = 0       # total download bandwidth cap, bytes/sec; 0 = unlimited (e.g. 5242880 = 5 MiB/s)
+per_download_max_rate = 0       # per-download bandwidth cap, bytes/sec; 0 = unlimited (e.g. 1048576 = 1 MiB/s)
+rate_burst            = 0       # token-bucket capacity, bytes; 0 = derive from rate (floored at 2*buffer_size)
 
 [network]
 proxy_url       = ""            # e.g. "http://127.0.0.1:8080"; empty = none
