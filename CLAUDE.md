@@ -16,8 +16,8 @@ speed and efficiency**. Module path: `github.com/K-RED90/gidm`.
    bytes per iteration (pooled buffers + `io.CopyBuffer`), verified by a
    `-benchmem` benchmark. Allocate freely in cold paths (setup, config, UI).
 3. **Std-lib first, minimal dependencies.** Every dependency is audited and
-   justified. The whole engine currently has one third-party dep
-   (`BurntSushi/toml`, used only by config).
+   justified. Two direct third-party deps: `BurntSushi/toml` (config) and
+   `modernc.org/sqlite` (the store; pure Go, no CGO).
 4. **Nothing hardcoded.** Every tunable lives in `internal/config` and is
    overridable: defaults → file → env → flags.
 5. **Everything tested.** Tests run under `-race`. Cover failure modes, not just
