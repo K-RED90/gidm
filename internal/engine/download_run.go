@@ -42,6 +42,79 @@ func (e *Engine) Download(ctx context.Context, url string) (*Download, error) {
 		return nil, err
 	}
 
+	return e.transfer(ctx, dl, fresh)
+}
+
+// Run drives a download for a record the caller already minted and persisted
+// (with its own ID), which is how Manager controls IDs and lifecycle. It probes
+// dl.URL, resolves the destination, reconciles dl against the fresh probe
+// (planning segments on a first run and restarting cleanly if the remote file
+// changed), persists the record active, then runs the same transfer pipeline as
+// Download. The passed dl is mutated in place and the persisted snapshot is
+// returned. Unlike Download, Run never matches by destination — the record's ID
+// is authoritative — so two callers must not Run records targeting the same
+// destination concurrently (Manager serializes that via its worker pool).
+func (e *Engine) Run(ctx context.Context, dl *Download) (*Download, error) {
+	probe, err := e.fetcher.Probe(ctx, dl.URL)
+	if err != nil {
+		return nil, fmt.Errorf("engine: probe %q: %w", dl.URL, err)
+	}
+
+	fetchURL := probe.FinalURL
+	if fetchURL == "" {
+		fetchURL = dl.URL
+	}
+
+	dest := e.destPath(probe, fetchURL)
+	if err := os.MkdirAll(e.downloadDir, 0o755); err != nil {
+		return nil, fmt.Errorf("engine: create download dir %q: %w", e.downloadDir, err)
+	}
+
+	fresh := e.resolveRecord(dl, fetchURL, dest, probe)
+	dl.Status = StatusActive
+	dl.UpdatedAt = time.Now().UTC()
+	if err := e.store.SaveDownload(ctx, dl); err != nil {
+		return nil, fmt.Errorf("engine: persist run %q: %w", dl.ID, err)
+	}
+
+	return e.transfer(ctx, dl, fresh)
+}
+
+// resolveRecord reconciles a caller-owned record against a fresh probe in place,
+// reporting whether the .part file should be (re)created from scratch. A record
+// with no segments is a first run (plan from the probe, fresh). A record whose
+// validators no longer match the remote (the file changed) is restarted: its
+// segments are re-planned and its progress discarded. Otherwise the persisted
+// segments are kept and the run resumes from their checkpoints.
+func (e *Engine) resolveRecord(dl *Download, fetchURL, dest string, probe ProbeInfo) (fresh bool) {
+	dl.URL = fetchURL
+	dl.Destination = dest
+
+	if len(dl.Segments) == 0 {
+		dl.TotalSize = probe.Size
+		dl.ETag = probe.ETag
+		dl.LastModified = probe.LastModified
+		dl.Segments = e.planFor(probe)
+		return true
+	}
+
+	if !validatorsMatch(dl, probe) {
+		dl.TotalSize = probe.Size
+		dl.ETag = probe.ETag
+		dl.LastModified = probe.LastModified
+		dl.Segments = e.planFor(probe)
+		return true
+	}
+
+	return false
+}
+
+// transfer runs the shared download pipeline for a record already resolved and
+// persisted active: open the .part, reconcile progress against the file, fan out
+// the segments, then sync/checksum/finalize, mapping the outcome onto a terminal
+// persisted record. It is the common tail of both Download and Run.
+func (e *Engine) transfer(ctx context.Context, dl *Download, fresh bool) (*Download, error) {
+	dest := dl.Destination
 	partPath := dest + partSuffix
 	part, err := openPart(partPath, dl, fresh)
 	if err != nil {
@@ -57,6 +130,8 @@ func (e *Engine) Download(ctx context.Context, url string) (*Download, error) {
 		_ = part.Close()
 		return nil, err
 	}
+	e.observeStart(dl.ID, prog)
+	defer e.observeStop(dl.ID)
 
 	runErr := e.runSegments(ctx, dl, part, prog)
 

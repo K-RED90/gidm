@@ -16,6 +16,11 @@ type Engine struct {
 	fetcher     Fetcher
 	store       Store
 
+	// observer is an optional live-progress hook a Manager registers once at
+	// construction (before any transfer runs), so it is read-only thereafter and
+	// needs no lock. nil for the standalone Download path.
+	observer progressObserver
+
 	// bufPool hands out reusable transfer buffers sized cfg.BufferSize. Pooling
 	// keeps the per-chunk copy loop allocation-free (CLAUDE.md principle 2).
 	bufPool sync.Pool

@@ -10,6 +10,12 @@ const (
 	StatusPaused    Status = "paused"
 	StatusCompleted Status = "completed"
 	StatusFailed    Status = "failed"
+
+	// StatusCanceled is a terminal state set by Manager.Cancel. It is distinct
+	// from StatusFailed (which marks a genuine transfer error): a canceled
+	// download stopped on an operator's request, keeps its .part file, and may be
+	// re-enqueued by Manager.Resume.
+	StatusCanceled Status = "canceled"
 )
 
 type Download struct {
