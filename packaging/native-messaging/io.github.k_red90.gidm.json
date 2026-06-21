@@ -1,0 +1,9 @@
+{
+  "name": "io.github.k_red90.gidm",
+  "description": "gidm native messaging host",
+  "path": "/usr/local/bin/gidm-host",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://REPLACE_WITH_EXTENSION_ID/"
+  ]
+}
