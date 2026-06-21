@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
-	"syscall"
 	"time"
 
 	"github.com/K-RED90/gidm/internal/api"
@@ -64,12 +63,12 @@ func (c *client) do(ctx context.Context, req api.Request) (api.Response, error) 
 }
 
 // classifyDialErr maps a dial failure to a sentinel. A missing socket file
-// (fs.ErrNotExist) and a refused connection (syscall.ECONNREFUSED, defined on
-// every supported OS) both mean the daemon is not listening; a deadline means
-// the dial timed out.
+// (fs.ErrNotExist) and a refused connection (isConnRefused, which spells the
+// errno differently per OS) both mean the daemon is not listening; a deadline
+// means the dial timed out.
 func (c *client) classifyDialErr(err error) error {
 	switch {
-	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ECONNREFUSED):
+	case errors.Is(err, fs.ErrNotExist), isConnRefused(err):
 		return fmt.Errorf("dial %q: %w: %w", c.socket, errDaemonNotRunning, err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return fmt.Errorf("dial %q: %w: %w", c.socket, errTimeout, err)
