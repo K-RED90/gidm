@@ -59,6 +59,11 @@ type Server struct {
 	baseCtx  context.Context
 	cancel   context.CancelFunc
 	conns    sync.WaitGroup
+	// closing is set by Close under mu before it waits on conns. The accept loop
+	// checks it under the same mu before conns.Add, so no positive Add can run
+	// concurrently with conns.Wait — the data race a late connection would
+	// otherwise trigger between Serve and Close.
+	closing bool
 	// active tracks every accepted connection still being handled so Close can
 	// force-close them when the shutdown deadline fires. Forcing the close
 	// unblocks any handler stuck in a Read/Write, which lets conns.Wait return —
@@ -124,8 +129,19 @@ func (s *Server) Serve(ctx context.Context) error {
 			s.logger.Warn("apiserver: accept failed", "err", err)
 			continue
 		}
+		// Register the connection under mu, but only if Close has not begun shutting
+		// down: that orders every conns.Add before Close's conns.Wait (they share mu),
+		// so a connection accepted in the same instant Close fires cannot race the
+		// WaitGroup. A late connection arriving after closing is set is simply dropped.
+		s.mu.Lock()
+		if s.closing {
+			s.mu.Unlock()
+			_ = conn.Close()
+			continue
+		}
 		s.conns.Add(1)
-		s.trackConn(conn)
+		s.active[conn] = struct{}{}
+		s.mu.Unlock()
 		go s.handleConn(baseCtx, conn)
 	}
 }
@@ -137,6 +153,7 @@ func (s *Server) Serve(ctx context.Context) error {
 // drain).
 func (s *Server) Close() error {
 	s.mu.Lock()
+	s.closing = true // stop the accept loop from registering any new connection
 	l := s.listener
 	cancel := s.cancel
 	s.mu.Unlock()
@@ -187,14 +204,9 @@ func (s *Server) Addr() net.Addr {
 	return s.listener.Addr()
 }
 
-// trackConn records an accepted connection so Close can force it shut on a
-// shutdown-timeout. untrackConn drops it once its handler is done.
-func (s *Server) trackConn(conn net.Conn) {
-	s.mu.Lock()
-	s.active[conn] = struct{}{}
-	s.mu.Unlock()
-}
-
+// untrackConn drops a connection from the active set once its handler is done.
+// The matching insert happens inline in the accept loop, under the same mu guard
+// that conns.Add uses, so registration and the WaitGroup bump are one atomic step.
 func (s *Server) untrackConn(conn net.Conn) {
 	s.mu.Lock()
 	delete(s.active, conn)
