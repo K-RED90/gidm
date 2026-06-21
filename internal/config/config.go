@@ -59,6 +59,12 @@ type Daemon struct {
 	WriteTimeout    Duration `toml:"write_timeout"`
 	ShutdownTimeout Duration `toml:"shutdown_timeout"`
 	MaxRequestBytes int      `toml:"max_request_bytes"`
+
+	// DialTimeout bounds the CLI's client-side dial plus one request/response
+	// round-trip over the socket. It is distinct from the server-side
+	// ReadTimeout/WriteTimeout above (which bound handler I/O): this caps how
+	// long `gidm` waits for `gidmd` before giving up.
+	DialTimeout Duration `toml:"dial_timeout"`
 }
 
 type Paths struct {
@@ -86,6 +92,7 @@ func Default() *Config {
 			WriteTimeout:    Duration(10 * time.Second),
 			ShutdownTimeout: Duration(10 * time.Second),
 			MaxRequestBytes: 1 << 20, // 1 MiB
+			DialTimeout:     Duration(10 * time.Second),
 		},
 		Log: Log{Level: "info", Format: "text"},
 	}
@@ -189,6 +196,7 @@ func applyEnv(c *Config) error {
 	dur("GIDM_DAEMON_WRITE_TIMEOUT", &c.Daemon.WriteTimeout)
 	dur("GIDM_DAEMON_SHUTDOWN_TIMEOUT", &c.Daemon.ShutdownTimeout)
 	num("GIDM_DAEMON_MAX_REQUEST_BYTES", &c.Daemon.MaxRequestBytes)
+	dur("GIDM_DAEMON_DIAL_TIMEOUT", &c.Daemon.DialTimeout)
 	str("GIDM_PATHS_DOWNLOAD_DIR", &c.Paths.DownloadDir)
 
 	str("GIDM_LOG_LEVEL", &c.Log.Level)
@@ -243,6 +251,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Daemon.MaxRequestBytes < 1 {
 		errs = append(errs, errors.New("daemon.max_request_bytes must be >= 1"))
+	}
+	if c.Daemon.DialTimeout <= 0 {
+		errs = append(errs, errors.New("daemon.dial_timeout must be > 0"))
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
