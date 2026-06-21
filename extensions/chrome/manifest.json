@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "gidm",
+  "version": "0.1.0",
+  "description": "Download with gidm — open-source download accelerator.",
+  "minimum_chrome_version": "116",
+  "permissions": ["downloads", "nativeMessaging"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "gidm" }
+}
