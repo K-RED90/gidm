@@ -30,6 +30,21 @@ const pragmas = "_pragma=journal_mode(WAL)" +
 	"&_pragma=busy_timeout(5000)" +
 	"&_pragma=synchronous(NORMAL)"
 
+// Pool bounds. Writers are serialized by mu (SQLite admits one at a time), so a
+// handful of connections is plenty for the concurrent WAL reads; capping it
+// bounds file descriptors and turns any future connection leak into early
+// backpressure instead of a silent wedge. Idle connections are reaped so a quiet
+// store does not hold the database open indefinitely.
+const (
+	maxOpenConns    = 4
+	connMaxIdleTime = 5 * time.Minute
+)
+
+// closeTimeout caps Close so a connection wedged by a cancelled in-flight query
+// can never hang shutdown forever; the process exits and the stray db.Close
+// goroutine unwinds (or is reaped at exit) on its own.
+const closeTimeout = 5 * time.Second
+
 // Store persists downloads and settings in embedded SQLite. It is safe for
 // concurrent use: reads run concurrently under WAL, while mu serializes the
 // writers SQLite admits only one of at a time.
@@ -49,6 +64,8 @@ func New(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: open %q: %w", path, err)
 	}
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	s := &Store{db: db}
 	if err := s.migrate(context.Background()); err != nil {
@@ -68,11 +85,31 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
+// Close closes the database, bounded by closeTimeout. database/sql.Close does
+// not wait for in-use connections, but a connection wedged in the driver by a
+// cancelled in-flight query can still block here; the deadline guarantees the
+// caller (and the process) is never held hostage. Close is idempotent, so the
+// leaked goroutine finishing later is harmless.
 func (s *Store) Close() error {
-	if err := s.db.Close(); err != nil {
-		return fmt.Errorf("sqlite: close: %w", err)
+	return closeWithDeadline(s.db.Close, closeTimeout)
+}
+
+// closeWithDeadline runs close in a goroutine and returns its error, or a
+// timeout error if it does not finish within timeout. The goroutine is left to
+// finish on its own; with database/sql's idempotent Close that is safe.
+func closeWithDeadline(close func() error, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- close() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("sqlite: close: %w", err)
+		}
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("sqlite: close timed out after %s", timeout)
 	}
-	return nil
 }
 
 // Times are stored as RFC3339 in UTC so they round-trip losslessly to the

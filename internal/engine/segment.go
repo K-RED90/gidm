@@ -15,6 +15,12 @@ import (
 // a final write when the stream ends.
 const checkpointInterval = time.Second
 
+// checkpointWriteTimeout bounds a single checkpoint store write. The write runs
+// on a context detached from the run context (see checkpoint) so a per-run
+// cancel never aborts an in-flight db query and wedges the connection; this cap
+// keeps a genuinely stuck store from outliving the transfer.
+const checkpointWriteTimeout = 5 * time.Second
+
 // runSegment transfers one ranged segment into part, retrying mid-stream body
 // errors up to MaxRetries and resuming from the last checkpointed offset. Its live
 // Completed lives in prog (a lock-free atomic counter), so the per-chunk loop never
@@ -314,7 +320,12 @@ func (p *progressWriter) checkpoint(final bool) {
 	if !final && seg.Completed == p.base {
 		return // nothing new since the last checkpoint
 	}
-	_ = p.store.UpdateSegment(p.ctx, p.downloadID, seg)
+	// Detach from the run context: a cancelled parent (a sibling's error, a
+	// pause, or shutdown) must not abort this write mid-query and leave the
+	// connection wedged. Cap it so a stuck store cannot outlive the transfer.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), checkpointWriteTimeout)
+	defer cancel()
+	_ = p.store.UpdateSegment(ctx, p.downloadID, seg)
 }
 
 // liveSegment builds the segment value to persist. On a work-stealing run it reads
