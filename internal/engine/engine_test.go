@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/K-RED90/gidm/internal/config"
@@ -20,12 +21,29 @@ func (stubStore) Close() error                                            { retu
 
 var _ Store = stubStore{}
 
+type fetcherStub struct{}
+
+func (fetcherStub) Probe(context.Context, string) (ProbeInfo, error) { return ProbeInfo{}, nil }
+func (fetcherStub) RangeGet(context.Context, string, int64, int64) (io.ReadCloser, error) {
+	return nil, nil
+}
+func (fetcherStub) Get(context.Context, string) (io.ReadCloser, error) { return nil, nil }
+
+var _ Fetcher = fetcherStub{}
+
+func cfgWith(d config.Download) config.Config {
+	return config.Config{Download: d}
+}
+
 func TestEngineReady(t *testing.T) {
-	if New(config.Download{MaxConcurrent: 4}, stubStore{}).Ready() != true {
+	if New(cfgWith(config.Download{MaxConcurrent: 4}), fetcherStub{}, stubStore{}).Ready() != true {
 		t.Error("Ready() = false, want true for a wired engine")
 	}
-	if New(config.Download{MaxConcurrent: 4}, nil).Ready() != false {
+	if New(cfgWith(config.Download{MaxConcurrent: 4}), fetcherStub{}, nil).Ready() != false {
 		t.Error("Ready() = true, want false when store is nil")
+	}
+	if New(cfgWith(config.Download{MaxConcurrent: 4}), nil, stubStore{}).Ready() != false {
+		t.Error("Ready() = true, want false when fetcher is nil")
 	}
 }
 
