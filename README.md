@@ -56,7 +56,7 @@ desktop ────────────────┘
 | `internal/store/sqlite` | SQLite persistence behind `engine.Store` |
 | `internal/api` | daemon control API (M2) |
 | `cmd/gidmd` | daemon |
-| `cmd/gidm` | CLI client |
+| `cmd/gidm` | CLI client (`add`, `list`, `status`/`get`, `pause`, `resume`, `rm`) |
 | `cmd/gidm-host` | Chrome native-messaging host |
 | `desktop/` | Wails + Svelte desktop app (M5) |
 | `extensions/chrome/` | Chrome extension (M4) |
@@ -78,6 +78,26 @@ make check   # vet + test
 Nothing is hardcoded. Settings resolve in order (later wins): built-in defaults →
 TOML config file → `GIDM_*` environment variables → command-line flags. Copy
 `configs/gidm.example.toml` to your OS config dir, or point `$GIDM_CONFIG` at it.
+
+## CLI
+
+`gidm` drives a running `gidmd` over its Unix socket — it speaks only the
+`internal/api` protocol and never links the engine, store, or HTTP layers.
+
+```sh
+gidmd &                         # start the daemon
+gidm add https://example/f.bin  # prints the new download id
+gidm list                       # id, status, progress, size, destination
+gidm status <id>                # one download (alias: gidm get <id>)
+gidm pause <id>                 # pause / resume / cancel
+gidm resume <id>
+gidm rm <id>
+```
+
+Add `--json` to any command for machine-readable output. `--socket`, `--config`,
+and `--timeout` override the configured socket path and client round-trip budget
+(`daemon.dial_timeout`). Exit codes: `0` ok, `2` bad request, `3` daemon not
+running, `4` timeout, `5` not found.
 
 ## Roadmap
 
