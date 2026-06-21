@@ -1,0 +1,32 @@
+# gidm example configuration.
+#
+# Copy to <user config dir>/gidm/config.toml, or point $GIDM_CONFIG at it.
+# Every value is optional and overridable by env (GIDM_SECTION_KEY) or flags.
+# Precedence (low -> high): defaults < this file < environment < flags.
+# Empty path values fall back to OS-appropriate defaults.
+
+[download]
+max_concurrent        = 4       # downloads transferring at once
+segments_per_download = 8       # parallel byte-range segments (IDM-style acceleration)
+buffer_size           = 65536   # per-read copy buffer, bytes (pooled per worker)
+timeout               = "30s"   # per-request timeout
+max_retries           = 5
+retry_backoff         = "2s"    # base backoff, grows exponentially
+
+[network]
+proxy_url       = ""            # e.g. "http://127.0.0.1:8080"; empty = none
+user_agent      = "gidm/0.1 (+https://github.com/K-RED90/gidm)"
+tls_skip_verify = false         # insecure; leave false unless you must
+
+[storage]
+db_path = ""                    # empty = <data dir>/gidm.db
+
+[daemon]
+socket_path = ""                # empty = <data dir>/gidmd.sock
+
+[paths]
+download_dir = ""               # empty = OS Downloads folder
+
+[log]
+level  = "info"                 # debug | info | warn | error
+format = "text"                 # text | json
