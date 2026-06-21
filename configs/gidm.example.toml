@@ -25,7 +25,9 @@ tls_skip_verify = false         # insecure; leave false unless you must
 db_path = ""                    # empty = <data dir>/gidm.db
 
 [daemon]
-socket_path = ""                # empty = <data dir>/gidmd.sock
+socket_path  = ""               # empty = <data dir>/gidmd.sock
+dial_timeout = "10s"            # gidm CLI: dial + round-trip budget (client-side;
+                                # distinct from the server-side read/write timeouts)
 
 [paths]
 download_dir = ""               # empty = OS Downloads folder

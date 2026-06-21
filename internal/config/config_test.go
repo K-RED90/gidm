@@ -132,6 +132,9 @@ func TestDaemonTunableDefaults(t *testing.T) {
 	if c.Daemon.MaxRequestBytes != 1<<20 {
 		t.Errorf("max_request_bytes = %d, want %d", c.Daemon.MaxRequestBytes, 1<<20)
 	}
+	if c.Daemon.DialTimeout.Duration() != 10*time.Second {
+		t.Errorf("dial_timeout = %s, want 10s", c.Daemon.DialTimeout.Duration())
+	}
 	if err := c.Validate(); err != nil {
 		t.Errorf("default daemon config is invalid: %v", err)
 	}
@@ -142,6 +145,7 @@ func TestDaemonTunablesLayering(t *testing.T) {
 	t.Setenv("GIDM_CONFIG", path)
 	t.Setenv("GIDM_DAEMON_READ_TIMEOUT", "5s") // env overrides file
 	t.Setenv("GIDM_DAEMON_WRITE_TIMEOUT", "7s")
+	t.Setenv("GIDM_DAEMON_DIAL_TIMEOUT", "3s")
 
 	c, err := Load()
 	if err != nil {
@@ -152,6 +156,9 @@ func TestDaemonTunablesLayering(t *testing.T) {
 	}
 	if c.Daemon.WriteTimeout.Duration() != 7*time.Second {
 		t.Errorf("write_timeout = %s, want 7s (env)", c.Daemon.WriteTimeout.Duration())
+	}
+	if c.Daemon.DialTimeout.Duration() != 3*time.Second {
+		t.Errorf("dial_timeout = %s, want 3s (env)", c.Daemon.DialTimeout.Duration())
 	}
 	if c.Daemon.MaxRequestBytes != 2048 {
 		t.Errorf("max_request_bytes = %d, want 2048 (file)", c.Daemon.MaxRequestBytes)
@@ -246,6 +253,7 @@ func TestDaemonTunablesValidation(t *testing.T) {
 		{"write_timeout <= 0", func(c *Config) { c.Daemon.WriteTimeout = 0 }},
 		{"shutdown_timeout <= 0", func(c *Config) { c.Daemon.ShutdownTimeout = 0 }},
 		{"max_request_bytes < 1", func(c *Config) { c.Daemon.MaxRequestBytes = 0 }},
+		{"dial_timeout <= 0", func(c *Config) { c.Daemon.DialTimeout = 0 }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
