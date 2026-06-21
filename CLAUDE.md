@@ -6,7 +6,25 @@ Working guide for Claude on this repo. Read before making changes.
 
 `gidm` is an open-source, high-performance download manager in Go — a free
 alternative to Internet Download Manager (IDM). The goal is to **beat IDM on
-speed and efficiency**. Module path: `github.com/K-RED90/gidm`.
+download performance**. Module path: `github.com/K-RED90/gidm`.
+
+## Performance — how we beat IDM
+
+Throughput is the whole point. The levers, in priority order:
+
+1. **Segmented parallel downloads** — split each file into byte ranges fetched
+   concurrently over separate connections; one slow stream never caps the link.
+2. **Zero-alloc transfer loop** — pooled buffers + `io.CopyBuffer`, so the GC
+   never touches downloaded bytes (principle 2 below).
+3. **Connection reuse** — one tuned transport with keep-alive/HTTP2 shared across
+   all segments; pay the TCP+TLS handshake once, not per request.
+4. **Persistence off the hot path** — checkpoint resume progress periodically,
+   never per chunk.
+5. **Work-stealing segmentation (M3)** — rebalance ranges so fast workers absorb
+   a straggler's remaining bytes.
+
+Measure, don't guess: back every performance claim with a `-benchmem`/throughput
+benchmark before trusting it.
 
 ## Core principles (non-negotiable)
 
@@ -31,8 +49,20 @@ speed and efficiency**. Module path: `github.com/K-RED90/gidm`.
 
 Pure-Go **engine** → **daemon** (`gidmd`, API over a Unix socket) → clients
 (**CLI**, **desktop**, **Chrome extension**). The extension talks to the daemon
-via a thin native-messaging host (`gidm-host`). The engine never imports the
-daemon/clients and persists only through the `engine.Store` interface.
+via a thin native-messaging host (`gidm-host`). The engine fetches over HTTP
+through the `httpx` adapter, never imports the daemon/clients, and persists only
+through the `engine.Store` interface.
+
+## HTTP
+
+All network I/O goes through `internal/httpx` (`net/http` only). It is a leaf
+adapter — imports only the std lib and `internal/config` — exposing one pooled
+`*Client`: `Probe` (size, range support, validators, suggested filename),
+`RangeGet` (a streamed 206 for a single segment), retry with backoff, and a
+bounded, secure redirect policy (http/https only, no downgrades). The transport
+is reused for keep-alive; the response body is never read into memory here, and
+no overall client timeout is set (only connection setup is bounded, so long
+streaming downloads are governed by the caller's context).
 
 ## Storage
 
@@ -63,7 +93,8 @@ make tidy    # go mod tidy
 ## Roadmap
 
 - **M0** foundation (done): structure, config, tooling, CI, engine contracts.
-- **M1** core engine: segmented download, resume, retries, integrity, SQLite store.
+- **M1** core engine: segmented download, resume, retries, integrity, SQLite
+  store, HTTP layer. *In progress — SQLite store and `httpx` HTTP layer landed.*
 - **M2** daemon + CLI.
 - **M3** dynamic segmentation (work-stealing), rate limiting, scheduler.
 - **M4** Chrome extension + native-messaging host.
