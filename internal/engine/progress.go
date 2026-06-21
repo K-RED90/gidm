@@ -46,10 +46,19 @@ type segProgress struct {
 	completed []atomic.Int64
 }
 
-// newSegProgress builds the counter set for segs, seeding each counter from the
-// segment's persisted Completed so a resumed download starts from its checkpoint.
-func newSegProgress(segs []Segment) *segProgress {
-	p := &segProgress{completed: make([]atomic.Int64, len(segs))}
+// newSegProgressSized builds the counter set with room for maxSlots segments,
+// seeding the first len(segs) from their persisted Completed and leaving the rest
+// at zero so a resumed download starts from its checkpoint. A work-stealing run
+// pre-sizes to its upper bound so steals consume already-allocated slots: the
+// backing array is never reallocated, so the Manager's observer can read it
+// lock-free while steals append segments. With maxSlots == len(segs) it is the
+// exact (non-stealing) counter set. maxSlots is clamped up to len(segs) so the
+// seeded counters always fit.
+func newSegProgressSized(segs []Segment, maxSlots int) *segProgress {
+	if maxSlots < len(segs) {
+		maxSlots = len(segs)
+	}
+	p := &segProgress{completed: make([]atomic.Int64, maxSlots)}
 	for i := range segs {
 		p.completed[i].Store(segs[i].Completed)
 	}

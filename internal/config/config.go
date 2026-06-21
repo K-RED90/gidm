@@ -35,6 +35,15 @@ type Download struct {
 	Timeout             Duration `toml:"timeout"`
 	MaxRetries          int      `toml:"max_retries"`
 	RetryBackoff        Duration `toml:"retry_backoff"`
+
+	// WorkStealing rebalances a download's byte ranges mid-flight: a worker that
+	// finishes its segment steals the unfetched tail of the segment with the most
+	// bytes left, so fast connections absorb a straggler's remainder. MaxSegments
+	// caps how many segments a download may fragment into; MinStealSize is the
+	// floor below which splitting a remainder is not worth the request overhead.
+	WorkStealing bool `toml:"work_stealing"`
+	MaxSegments  int  `toml:"max_segments"`
+	MinStealSize int  `toml:"min_steal_size"`
 }
 
 type Network struct {
@@ -79,6 +88,9 @@ func Default() *Config {
 			Timeout:             Duration(30 * time.Second),
 			MaxRetries:          5,
 			RetryBackoff:        Duration(2 * time.Second),
+			WorkStealing:        true,
+			MaxSegments:         64,
+			MinStealSize:        1 << 20, // 1 MiB
 		},
 		Network: Network{UserAgent: defaultUserAgent},
 		Daemon: Daemon{
@@ -178,6 +190,9 @@ func applyEnv(c *Config) error {
 	dur("GIDM_DOWNLOAD_TIMEOUT", &c.Download.Timeout)
 	num("GIDM_DOWNLOAD_MAX_RETRIES", &c.Download.MaxRetries)
 	dur("GIDM_DOWNLOAD_RETRY_BACKOFF", &c.Download.RetryBackoff)
+	boolean("GIDM_DOWNLOAD_WORK_STEALING", &c.Download.WorkStealing)
+	num("GIDM_DOWNLOAD_MAX_SEGMENTS", &c.Download.MaxSegments)
+	num("GIDM_DOWNLOAD_MIN_STEAL_SIZE", &c.Download.MinStealSize)
 
 	str("GIDM_NETWORK_PROXY_URL", &c.Network.ProxyURL)
 	str("GIDM_NETWORK_USER_AGENT", &c.Network.UserAgent)
@@ -231,6 +246,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Download.MaxRetries < 0 {
 		errs = append(errs, errors.New("download.max_retries must be >= 0"))
+	}
+	if c.Download.WorkStealing {
+		if c.Download.MaxSegments < 1 {
+			errs = append(errs, errors.New("download.max_segments must be >= 1 when work_stealing is enabled"))
+		}
+		if c.Download.MinStealSize < 1 {
+			errs = append(errs, errors.New("download.min_steal_size must be >= 1 when work_stealing is enabled"))
+		}
 	}
 	if c.Daemon.ReadTimeout <= 0 {
 		errs = append(errs, errors.New("daemon.read_timeout must be > 0"))

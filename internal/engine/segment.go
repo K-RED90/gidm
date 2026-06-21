@@ -16,15 +16,27 @@ import (
 const checkpointInterval = time.Second
 
 // runSegment transfers one ranged segment into part, retrying mid-stream body
-// errors up to MaxRetries and resuming from the last checkpointed offset. It owns
-// Download.Segments[idx] exclusively; its live Completed lives in prog (a lock-free
-// atomic counter), so the per-chunk loop never contends on a process-wide mutex.
-// Already-Done segments return immediately. After a clean stream it asserts the
-// segment actually reached its end, so a short body (a clean EOF before the full
-// range arrives) is retried rather than silently accepted (no truncated rename).
-func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress) error {
-	seg := dl.Segments[idx] // Start/End/Index are immutable for the run; safe without a lock.
-	if isDone(seg, prog.load(idx)) {
+// errors up to MaxRetries and resuming from the last checkpointed offset. Its live
+// Completed lives in prog (a lock-free atomic counter), so the per-chunk loop never
+// contends on a process-wide mutex. Already-Done segments return immediately. After
+// a clean stream it asserts the segment actually reached its end, so a short body (a
+// clean EOF before the full range arrives) is retried rather than silently accepted
+// (no truncated rename).
+//
+// coord carries the live segmentation for a work-stealing run: Start is immutable
+// for the slot, but End is re-read each attempt because a thief may shrink it (the
+// donor then stops at the new boundary, signalled by errSegmentStolen). Reaching a
+// clip boundary is confirmed complete under the coordinator lock (coord.settled),
+// which rules out a steal that was tentatively shrunk then undone; an undone steal
+// restores the End and the loop re-fetches the remainder. coord is nil for the
+// static and whole-body paths, where the segment's bounds are the immutable record.
+func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord) error {
+	var plan *livePlan
+	if coord != nil {
+		plan = coord.plan
+	}
+	start := segStart(dl, plan, idx) // immutable for the run; safe without a lock.
+	if isDone(Segment{Start: start, End: segEnd(dl, plan, idx)}, prog.load(idx)) {
 		return nil
 	}
 
@@ -43,12 +55,13 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 			}
 		}
 
-		from := seg.Start + prog.load(idx)
-		if from > seg.End {
-			break // fully fetched between attempts
+		end := segEnd(dl, plan, idx) // re-read: a thief may have shrunk the tail.
+		from := start + prog.load(idx)
+		if from > end {
+			break // fully fetched between attempts (or the tail was stolen away)
 		}
 
-		body, err := e.fetcher.RangeGet(ctx, dl.URL, from, seg.End)
+		body, err := e.fetcher.RangeGet(ctx, dl.URL, from, end)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -57,10 +70,20 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 			continue
 		}
 
-		err = e.streamInto(ctx, body, part, from, dl, idx, prog, buf)
+		err = e.streamInto(ctx, body, part, from, dl, idx, prog, plan, start, buf)
 		_ = body.Close()
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if errors.Is(err, errSegmentStolen) {
+			// Filled up to the live End. Confirm under the coordinator lock: a real
+			// finish (or a committed steal) is done; a steal that was undone restored
+			// a larger End, so re-fetch the remainder without spending the retry budget.
+			if coord.settled(idx, prog.load(idx)) {
+				return nil
+			}
+			attempt--
+			continue
 		}
 		if err != nil {
 			lastErr = err
@@ -70,7 +93,7 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 		// guarantee a body fills the requested range, so a short read that ends in
 		// io.EOF leaves the segment incomplete. Retry until the range is fully
 		// backed; only then is success real.
-		if isDone(seg, prog.load(idx)) {
+		if isDone(Segment{Start: start, End: segEnd(dl, plan, idx)}, prog.load(idx)) {
 			return nil
 		}
 		lastErr = io.ErrUnexpectedEOF
@@ -79,6 +102,23 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 		lastErr = errors.New("segment incomplete")
 	}
 	return fmt.Errorf("engine: segment %d: %w", idx, lastErr)
+}
+
+// segStart and segEnd report segment idx's bounds. With a live plan (work-stealing)
+// Start is immutable but End is read atomically because a thief may shrink it;
+// without one the bounds are the durable record's immutable values.
+func segStart(dl *Download, plan *livePlan, idx int) int64 {
+	if plan != nil {
+		return plan.start(idx)
+	}
+	return dl.Segments[idx].Start
+}
+
+func segEnd(dl *Download, plan *livePlan, idx int) int64 {
+	if plan != nil {
+		return plan.endLoad(idx)
+	}
+	return dl.Segments[idx].End
 }
 
 // isDone reports whether a segment with the given live completed count covers its
@@ -129,7 +169,7 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 			continue
 		}
 
-		err = e.streamInto(ctx, body, part, 0, dl, 0, prog, buf)
+		err = e.streamInto(ctx, body, part, 0, dl, 0, prog, nil, 0, buf)
 		_ = body.Close()
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -156,10 +196,11 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 
 // streamInto copies body into part starting at baseOff, advancing the segment's
 // live completed counter (lock-free) and checkpointing to the store on a coarse
-// cadence (never per chunk). baseOff is seg.Start + already-completed bytes for a
-// ranged segment, or 0 for the whole-body fallback. The copy runs in copySegment
-// so the zero-alloc benchmark covers the exact hot-path call.
-func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, buf []byte) error {
+// cadence (never per chunk). baseOff is segStart + already-completed bytes for a
+// ranged segment, or 0 for the whole-body fallback. plan/segStart are the
+// work-stealing handles (nil/0 on the static and whole-body paths). The copy runs
+// in copySegment so the zero-alloc benchmark covers the exact hot-path call.
+func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte) error {
 	startCompleted := prog.load(idx)
 
 	tracked := &progressWriter{
@@ -167,6 +208,8 @@ func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, 
 		ctx:        ctx,
 		prog:       prog,
 		segs:       dl.Segments,
+		plan:       plan,
+		start:      segStart,
 		idx:        idx,
 		base:       startCompleted,
 		store:      e.store,
@@ -181,13 +224,16 @@ func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, 
 
 // progressWriter wraps the offset writer to advance the segment's live completed
 // counter (lock-free) after each buffer flush and to checkpoint to the store on a
-// time cadence.
+// time cadence. When plan is non-nil (a work-stealing run) it also clips each flush
+// to the segment's live End so a donor never writes into a tail a thief took.
 type progressWriter struct {
 	dst io.Writer
 
 	ctx        context.Context
 	prog       *segProgress
-	segs       []Segment // immutable shape (Start/End/Index) for this run
+	segs       []Segment // durable shape, used only when plan == nil
+	plan       *livePlan // live End source for a work-stealing run; nil otherwise
+	start      int64     // segment Start, for the clip math (plan runs only)
 	idx        int
 	base       int64 // completed bytes at the start of this stream
 	written    int64 // bytes written during this stream
@@ -197,6 +243,27 @@ type progressWriter struct {
 }
 
 func (p *progressWriter) Write(b []byte) (int, error) {
+	if p.plan != nil {
+		// Re-read the live End at this flush boundary (off the per-byte path). A
+		// steal may have shrunk it; clip so this worker never writes into the
+		// donated tail. See the steal-safety invariant in steal.go.
+		room := (p.plan.endLoad(p.idx) - p.start + 1) - (p.base + p.written)
+		if room <= 0 {
+			return 0, errSegmentStolen // already filled to the shrunk End
+		}
+		if int64(len(b)) >= room {
+			n, err := p.dst.Write(b[:room])
+			if n > 0 {
+				p.written += int64(n)
+				p.prog.store(p.idx, p.base+p.written)
+			}
+			if err != nil {
+				return n, err // a real short-write/IO error, not the steal stop
+			}
+			return n, errSegmentStolen // clean stop exactly at the shrunk End
+		}
+	}
+
 	n, err := p.dst.Write(b)
 	if n > 0 {
 		p.written += int64(n)
@@ -214,11 +281,22 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 // are swallowed: a failed checkpoint only costs re-downloaded bytes on resume,
 // never correctness, and must not abort an otherwise healthy transfer.
 func (p *progressWriter) checkpoint(final bool) {
-	seg := p.prog.segmentAt(p.segs, p.idx)
+	seg := p.liveSegment()
 	if !final && seg.Completed == p.base {
 		return // nothing new since the last checkpoint
 	}
 	_ = p.store.UpdateSegment(p.ctx, p.downloadID, seg)
+}
+
+// liveSegment builds the segment value to persist. On a work-stealing run it reads
+// the live plan (the End may have shrunk since planning), never the stale durable
+// slice, so a donor's checkpoint can't resurrect its pre-steal End and corrupt the
+// resumable tiling.
+func (p *progressWriter) liveSegment() Segment {
+	if p.plan != nil {
+		return Segment{Index: p.idx, Start: p.start, End: p.plan.endLoad(p.idx), Completed: p.prog.load(p.idx)}
+	}
+	return p.prog.segmentAt(p.segs, p.idx)
 }
 
 // sleepCtx waits for d, returning ctx.Err() if the context is cancelled first. A

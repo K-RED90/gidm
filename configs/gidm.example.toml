@@ -12,6 +12,9 @@ buffer_size           = 65536   # per-read copy buffer, bytes (pooled per worker
 timeout               = "30s"   # per-request timeout
 max_retries           = 5
 retry_backoff         = "2s"    # base backoff, grows exponentially
+work_stealing         = true    # fast workers absorb a straggler's tail by splitting it mid-flight
+max_segments          = 64      # ceiling on live segments after work-stealing splits
+min_steal_size        = 1048576 # don't split a remainder below this many bytes (1 MiB)
 
 [network]
 proxy_url       = ""            # e.g. "http://127.0.0.1:8080"; empty = none
