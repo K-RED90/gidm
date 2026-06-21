@@ -383,12 +383,7 @@ func finalizeRename(partPath, dest string) error {
 	if err := os.Rename(partPath, dest); err != nil {
 		return fmt.Errorf("engine: rename %q -> %q: %w", partPath, dest, err)
 	}
-	dir, err := os.Open(filepath.Dir(dest))
-	if err != nil {
-		return fmt.Errorf("engine: open dest dir: %w", err)
-	}
-	defer func() { _ = dir.Close() }()
-	if err := dir.Sync(); err != nil {
+	if err := syncDir(filepath.Dir(dest)); err != nil {
 		return fmt.Errorf("engine: sync dest dir: %w", err)
 	}
 	return nil
