@@ -158,6 +158,85 @@ func TestDaemonTunablesLayering(t *testing.T) {
 	}
 }
 
+func TestWorkStealingDefaults(t *testing.T) {
+	c := Default()
+	if !c.Download.WorkStealing {
+		t.Error("default work_stealing = false, want true")
+	}
+	if c.Download.MaxSegments != 64 {
+		t.Errorf("default max_segments = %d, want 64", c.Download.MaxSegments)
+	}
+	if c.Download.MinStealSize != 1<<20 {
+		t.Errorf("default min_steal_size = %d, want %d", c.Download.MinStealSize, 1<<20)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("default config is invalid: %v", err)
+	}
+}
+
+// TestWorkStealingDefaultsTrueWhenFileOmitsKey guards the default-true toggle: the
+// TOML decoder must leave work_stealing at the Default() value when the key is
+// absent from the file, not reset it to the bool zero value.
+func TestWorkStealingDefaultsTrueWhenFileOmitsKey(t *testing.T) {
+	path := writeTempConfig(t, "[download]\nmax_concurrent = 6\n")
+	t.Setenv("GIDM_CONFIG", path)
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !c.Download.WorkStealing {
+		t.Error("work_stealing = false after a file that omits the key, want true (default preserved)")
+	}
+}
+
+func TestWorkStealingLayering(t *testing.T) {
+	path := writeTempConfig(t, "[download]\nwork_stealing = true\nmax_segments = 16\n")
+	t.Setenv("GIDM_CONFIG", path)
+	t.Setenv("GIDM_DOWNLOAD_WORK_STEALING", "false") // env overrides file
+	t.Setenv("GIDM_DOWNLOAD_MIN_STEAL_SIZE", "2097152")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Download.WorkStealing {
+		t.Error("work_stealing = true, want false (env overrides file)")
+	}
+	if c.Download.MaxSegments != 16 {
+		t.Errorf("max_segments = %d, want 16 (file)", c.Download.MaxSegments)
+	}
+	if c.Download.MinStealSize != 2097152 {
+		t.Errorf("min_steal_size = %d, want 2097152 (env)", c.Download.MinStealSize)
+	}
+}
+
+func TestWorkStealingValidation(t *testing.T) {
+	t.Run("max_segments < 1 when enabled", func(t *testing.T) {
+		c := Default()
+		c.Download.MaxSegments = 0
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate: expected error for max_segments = 0, got nil")
+		}
+	})
+	t.Run("min_steal_size < 1 when enabled", func(t *testing.T) {
+		c := Default()
+		c.Download.MinStealSize = 0
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate: expected error for min_steal_size = 0, got nil")
+		}
+	})
+	t.Run("unchecked when disabled", func(t *testing.T) {
+		c := Default()
+		c.Download.WorkStealing = false
+		c.Download.MaxSegments = 0
+		c.Download.MinStealSize = 0
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate: work-stealing knobs should be unchecked when disabled, got %v", err)
+		}
+	})
+}
+
 func TestDaemonTunablesValidation(t *testing.T) {
 	tests := []struct {
 		name   string

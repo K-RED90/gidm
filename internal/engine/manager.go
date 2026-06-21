@@ -231,11 +231,18 @@ func (m *Manager) Get(ctx context.Context, id string) (*Download, error) {
 // snapshot's segments, so a poll sees up-to-the-moment bytes without any store
 // write. It is O(segments) and takes the mutex only briefly to fetch the
 // counters pointer. A job not currently active keeps its persisted Completed.
+//
+// The counters are pre-sized to the work-stealing slot ceiling, so they can be
+// longer than the persisted segment slice while a steal's appended tail is not yet
+// checkpointed. snapshotInto reads only the snapshot's prefix, which always pairs
+// index-for-index with the live counters (slots are append-only, never reordered),
+// so it stays in bounds and coherent; the fold is skipped only if the counters are
+// somehow shorter than the snapshot.
 func (m *Manager) foldLiveProgress(d *Download) {
 	m.mu.Lock()
 	prog := m.live[d.ID]
 	m.mu.Unlock()
-	if prog == nil || len(d.Segments) != len(prog.completed) {
+	if prog == nil || len(prog.completed) < len(d.Segments) {
 		return
 	}
 	prog.snapshotInto(d.Segments)

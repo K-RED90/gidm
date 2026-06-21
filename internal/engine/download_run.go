@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -125,11 +126,14 @@ func (e *Engine) transfer(ctx context.Context, dl *Download, fresh bool) (*Downl
 	// before trusting any checkpoint. A missing, truncated, or desynced .part would
 	// otherwise leave skipped Done() regions as zero-filled holes in the renamed
 	// file (silent corruption on resume). prog becomes the live source of truth.
-	prog, err := reconcileProgress(dl, part, fresh)
-	if err != nil {
+	if err := reconcileProgress(dl, part, fresh); err != nil {
 		_ = part.Close()
 		return nil, err
 	}
+	// Pre-size the live counters to the work-stealing slot ceiling (just the segment
+	// count when stealing is off) so steals consume already-allocated slots and the
+	// observer's backing array is never reallocated under it.
+	prog := newSegProgressSized(dl.Segments, e.maxSlots(dl))
 	e.observeStart(dl.ID, prog)
 	defer e.observeStop(dl.ID)
 
@@ -248,18 +252,19 @@ func validatorsMatch(d *Download, probe ProbeInfo) bool {
 // For a fresh run there is nothing on disk to honor, so all counters start at zero.
 // For a resume, each segment's Completed is capped so Start+Completed never exceeds
 // the on-disk size, and for a known-size run the file is re-grown to at least
-// TotalSize so every WriteAt offset lands in an allocated region.
-func reconcileProgress(dl *Download, part *os.File, fresh bool) (*segProgress, error) {
+// TotalSize so every WriteAt offset lands in an allocated region. It mutates
+// dl.Segments in place; the caller builds the live counters from the reconciled set.
+func reconcileProgress(dl *Download, part *os.File, fresh bool) error {
 	if fresh {
 		for i := range dl.Segments {
 			dl.Segments[i].Completed = 0
 		}
-		return newSegProgress(dl.Segments), nil
+		return nil
 	}
 
 	info, err := part.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("engine: stat part: %w", err)
+		return fmt.Errorf("engine: stat part: %w", err)
 	}
 	onDisk := info.Size()
 
@@ -269,9 +274,14 @@ func reconcileProgress(dl *Download, part *os.File, fresh bool) (*segProgress, e
 	// past onDisk be re-fetched rather than trusted as zero-filled.
 	if dl.TotalSize > 0 && onDisk < dl.TotalSize {
 		if err := part.Truncate(dl.TotalSize); err != nil {
-			return nil, fmt.Errorf("engine: resize part on resume: %w", err)
+			return fmt.Errorf("engine: resize part on resume: %w", err)
 		}
 	}
+
+	// Heal any non-tiling segment set a torn work-stealing checkpoint may have left
+	// (a gap or overlap between a shrunk donor and its tail) so resume always
+	// reconstructs a clean cover of [0,TotalSize). A no-op for an untouched layout.
+	repairLayout(dl)
 
 	for i := range dl.Segments {
 		seg := dl.Segments[i]
@@ -291,29 +301,71 @@ func reconcileProgress(dl *Download, part *os.File, fresh bool) (*segProgress, e
 			dl.Segments[i].Completed = backed
 		}
 	}
-	return newSegProgress(dl.Segments), nil
+	return nil
 }
 
-// runSegments fans out one goroutine per incomplete segment, bounded by
-// SegmentsPerDownload, and returns the first error. A whole-body fallback (a
-// single open-ended segment) runs on its own path. On any error all siblings are
-// cancelled via the cause context. After a clean wait it asserts every ranged
-// segment is fully backed (and the summed bytes equal a known TotalSize) so no
-// truncated .part is ever renamed.
+// repairLayout rewrites a resumed download's segments into a clean tiling of
+// [0,TotalSize): segments are sorted by Start, each End is re-derived from the next
+// segment's Start (the last from TotalSize), indices are renumbered densely, and
+// Completed is clamped to the repaired size. Work-stealing persists a split as two
+// separate segment checkpoints (the shrunk donor and the new tail); a crash between
+// them — or a stale donor checkpoint racing the steal — could leave the store with a
+// gap or overlap that would otherwise wedge resume forever. Re-deriving the cover
+// from the segment starts heals it while re-fetching only the affected bytes. It is
+// a no-op for an already-tiling layout and is skipped for the whole-body fallback
+// and unknown sizes, which have no fixed ranges to reconcile.
+func repairLayout(dl *Download) {
+	if dl.TotalSize <= 0 || len(dl.Segments) < 2 {
+		return
+	}
+	for _, s := range dl.Segments {
+		if s.End < 0 {
+			return // an open-ended segment has no boundary to tile against
+		}
+	}
+	sort.Slice(dl.Segments, func(i, j int) bool { return dl.Segments[i].Start < dl.Segments[j].Start })
+	for i := range dl.Segments {
+		end := dl.TotalSize - 1
+		if i+1 < len(dl.Segments) {
+			end = dl.Segments[i+1].Start - 1
+		}
+		dl.Segments[i].Index = i
+		dl.Segments[i].End = end
+		if size := end - dl.Segments[i].Start + 1; dl.Segments[i].Completed > size {
+			dl.Segments[i].Completed = size
+		}
+		if dl.Segments[i].Completed < 0 {
+			dl.Segments[i].Completed = 0
+		}
+	}
+}
+
+// runSegments transfers a download's segments and returns the first error. A
+// whole-body fallback (a single open-ended segment) runs on its own path; otherwise
+// it dispatches to the static fan-out or the work-stealing pool per config. After a
+// clean run it asserts every ranged segment is fully backed (and the bytes sum to a
+// known TotalSize) so no truncated .part is ever renamed.
 func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
+	// Single open-ended segment: unknown size or no range support.
+	if len(dl.Segments) == 1 && dl.Segments[0].End < 0 {
+		runCtx, cancel := context.WithCancelCause(ctx)
+		defer cancel(nil)
+		return e.runWholeBody(runCtx, dl, part, prog)
+	}
+	if e.cfg.WorkStealing {
+		return e.runStealing(ctx, dl, part, prog)
+	}
+	return e.runStatic(ctx, dl, part, prog)
+}
+
+// runStatic is the fixed segmentation: one goroutine per incomplete segment,
+// bounded by SegmentsPerDownload, ranges immutable for the run. On any error all
+// siblings are cancelled via the cause context.
+func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	// Single open-ended segment: unknown size or no range support.
-	if len(dl.Segments) == 1 && dl.Segments[0].End < 0 {
-		return e.runWholeBody(runCtx, dl, part, prog)
-	}
-
-	limit := e.cfg.SegmentsPerDownload
-	if limit < 1 {
-		limit = 1
-	}
-	sem := make(chan struct{}, limit)
+	sem := make(chan struct{}, segLimit(e.cfg.SegmentsPerDownload))
 
 	var (
 		wg    sync.WaitGroup
@@ -345,10 +397,10 @@ func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, p
 		go func(idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := e.runSegment(runCtx, dl, idx, part, prog); err != nil {
+			if err := e.runSegment(runCtx, dl, idx, part, prog, nil); err != nil {
 				fail(err)
 			}
-		}(i)
+		}(i) // nil coord: static, immutable ranges
 	}
 
 	wg.Wait()
@@ -362,6 +414,109 @@ func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, p
 	// ranged segment is fully backed and, for a known size, that the bytes sum to
 	// TotalSize before the caller is allowed to rename the .part into place.
 	return verifyComplete(dl, prog)
+}
+
+// runStealing fans out a fixed pool of SegmentsPerDownload workers over a live,
+// rebalancing segmentation. A worker that finishes its segment steals the unfetched
+// tail of the in-flight segment with the most bytes left, so fast connections
+// absorb a straggler's remainder instead of idling. The plan and counters are
+// pre-sized to the slot ceiling so a steal never reallocates the arrays the
+// Manager's observer reads. After the pool drains, the durable segment slice is
+// rebuilt from the final layout for the completeness gate and the persisted record.
+func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, prog *segProgress) error {
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
+	n := len(dl.Segments)
+	maxSlots := len(prog.completed)
+	plan := newLivePlan(dl.Segments, maxSlots)
+	margin := int64(e.cfg.BufferSize)
+	coord := newStealCoord(plan, prog, n, maxSlots, e.stealFloor(), margin)
+
+	var (
+		wg    sync.WaitGroup
+		once  sync.Once
+		first error
+	)
+	fail := func(err error) {
+		once.Do(func() {
+			first = err
+			cancel(err)
+		})
+	}
+
+	for w := 0; w < segLimit(e.cfg.SegmentsPerDownload); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for runCtx.Err() == nil {
+				idx, steal, ok := coord.next()
+				if !ok {
+					return // no work and nothing worth stealing; remainders only shrink
+				}
+				if steal != nil {
+					// Persist the split off the coordinator mutex so a slow store never
+					// stalls dispatch; a torn write is healed by repairLayout on resume.
+					_ = e.store.UpdateSegment(runCtx, dl.ID, steal.donor)
+					_ = e.store.UpdateSegment(runCtx, dl.ID, steal.tail)
+				}
+				if err := e.runSegment(runCtx, dl, idx, part, prog, coord); err != nil {
+					fail(err)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// All workers have stopped: rebuild the durable shape from the final live plan
+	// (no concurrency now) so verifyComplete and the persisted record reflect every
+	// steal's donor shrink and new tail.
+	dl.Segments = coord.activeSegments()
+
+	if first != nil {
+		return first
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return verifyComplete(dl, prog)
+}
+
+// segLimit clamps the configured per-download parallelism to at least one worker.
+func segLimit(segmentsPerDownload int) int {
+	if segmentsPerDownload < 1 {
+		return 1
+	}
+	return segmentsPerDownload
+}
+
+// maxSlots is the upper bound on a download's live segment count: the segment count
+// when work-stealing is off, otherwise the configured ceiling (never below the
+// initial count). It sizes the pre-allocated, never-reallocated counter and plan
+// arrays.
+func (e *Engine) maxSlots(dl *Download) int {
+	n := len(dl.Segments)
+	if !e.cfg.WorkStealing || (n == 1 && dl.Segments[0].End < 0) {
+		return n
+	}
+	if e.cfg.MaxSegments > n {
+		return e.cfg.MaxSegments
+	}
+	return n
+}
+
+// stealFloor is the minimum piece size a split may produce. It floors the
+// configured MinStealSize at 2*BufferSize+1 so that, even at the floor, the split
+// point sits a full safety margin (one transfer buffer) beyond a donor's frontier;
+// this keeps the steal-safety margin strictly positive regardless of BufferSize.
+func (e *Engine) stealFloor() int64 {
+	floor := int64(e.cfg.MinStealSize)
+	if lo := 2*int64(e.cfg.BufferSize) + 1; floor < lo {
+		floor = lo
+	}
+	return floor
 }
 
 // verifyComplete asserts the transfer actually covered the whole file: every
