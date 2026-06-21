@@ -49,6 +49,16 @@ type Storage struct {
 
 type Daemon struct {
 	SocketPath string `toml:"socket_path"`
+
+	// ReadTimeout/WriteTimeout bound a single request's read and response write
+	// so a slow or stuck client never pins a handler goroutine. ShutdownTimeout
+	// bounds the drain of in-flight connection goroutines on a graceful stop.
+	// MaxRequestBytes caps one request frame so an oversized payload cannot
+	// exhaust memory.
+	ReadTimeout     Duration `toml:"read_timeout"`
+	WriteTimeout    Duration `toml:"write_timeout"`
+	ShutdownTimeout Duration `toml:"shutdown_timeout"`
+	MaxRequestBytes int      `toml:"max_request_bytes"`
 }
 
 type Paths struct {
@@ -71,7 +81,13 @@ func Default() *Config {
 			RetryBackoff:        Duration(2 * time.Second),
 		},
 		Network: Network{UserAgent: defaultUserAgent},
-		Log:     Log{Level: "info", Format: "text"},
+		Daemon: Daemon{
+			ReadTimeout:     Duration(30 * time.Second),
+			WriteTimeout:    Duration(10 * time.Second),
+			ShutdownTimeout: Duration(10 * time.Second),
+			MaxRequestBytes: 1 << 20, // 1 MiB
+		},
+		Log: Log{Level: "info", Format: "text"},
 	}
 	c.fillComputedDefaults()
 	return c
@@ -169,6 +185,10 @@ func applyEnv(c *Config) error {
 
 	str("GIDM_STORAGE_DB_PATH", &c.Storage.DBPath)
 	str("GIDM_DAEMON_SOCKET_PATH", &c.Daemon.SocketPath)
+	dur("GIDM_DAEMON_READ_TIMEOUT", &c.Daemon.ReadTimeout)
+	dur("GIDM_DAEMON_WRITE_TIMEOUT", &c.Daemon.WriteTimeout)
+	dur("GIDM_DAEMON_SHUTDOWN_TIMEOUT", &c.Daemon.ShutdownTimeout)
+	num("GIDM_DAEMON_MAX_REQUEST_BYTES", &c.Daemon.MaxRequestBytes)
 	str("GIDM_PATHS_DOWNLOAD_DIR", &c.Paths.DownloadDir)
 
 	str("GIDM_LOG_LEVEL", &c.Log.Level)
@@ -211,6 +231,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Download.MaxRetries < 0 {
 		errs = append(errs, errors.New("download.max_retries must be >= 0"))
+	}
+	if c.Daemon.ReadTimeout <= 0 {
+		errs = append(errs, errors.New("daemon.read_timeout must be > 0"))
+	}
+	if c.Daemon.WriteTimeout <= 0 {
+		errs = append(errs, errors.New("daemon.write_timeout must be > 0"))
+	}
+	if c.Daemon.ShutdownTimeout <= 0 {
+		errs = append(errs, errors.New("daemon.shutdown_timeout must be > 0"))
+	}
+	if c.Daemon.MaxRequestBytes < 1 {
+		errs = append(errs, errors.New("daemon.max_request_bytes must be >= 1"))
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":

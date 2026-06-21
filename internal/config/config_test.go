@@ -117,3 +117,64 @@ func TestInvalidConfigFailsValidation(t *testing.T) {
 		t.Fatal("Validate: expected error for max_concurrent = 0, got nil")
 	}
 }
+
+func TestDaemonTunableDefaults(t *testing.T) {
+	c := Default()
+	if c.Daemon.ReadTimeout.Duration() != 30*time.Second {
+		t.Errorf("read_timeout = %s, want 30s", c.Daemon.ReadTimeout.Duration())
+	}
+	if c.Daemon.WriteTimeout.Duration() != 10*time.Second {
+		t.Errorf("write_timeout = %s, want 10s", c.Daemon.WriteTimeout.Duration())
+	}
+	if c.Daemon.ShutdownTimeout.Duration() != 10*time.Second {
+		t.Errorf("shutdown_timeout = %s, want 10s", c.Daemon.ShutdownTimeout.Duration())
+	}
+	if c.Daemon.MaxRequestBytes != 1<<20 {
+		t.Errorf("max_request_bytes = %d, want %d", c.Daemon.MaxRequestBytes, 1<<20)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("default daemon config is invalid: %v", err)
+	}
+}
+
+func TestDaemonTunablesLayering(t *testing.T) {
+	path := writeTempConfig(t, "[daemon]\nread_timeout = \"15s\"\nmax_request_bytes = 2048\n")
+	t.Setenv("GIDM_CONFIG", path)
+	t.Setenv("GIDM_DAEMON_READ_TIMEOUT", "5s") // env overrides file
+	t.Setenv("GIDM_DAEMON_WRITE_TIMEOUT", "7s")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Daemon.ReadTimeout.Duration() != 5*time.Second {
+		t.Errorf("read_timeout = %s, want 5s (env over file)", c.Daemon.ReadTimeout.Duration())
+	}
+	if c.Daemon.WriteTimeout.Duration() != 7*time.Second {
+		t.Errorf("write_timeout = %s, want 7s (env)", c.Daemon.WriteTimeout.Duration())
+	}
+	if c.Daemon.MaxRequestBytes != 2048 {
+		t.Errorf("max_request_bytes = %d, want 2048 (file)", c.Daemon.MaxRequestBytes)
+	}
+}
+
+func TestDaemonTunablesValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"read_timeout <= 0", func(c *Config) { c.Daemon.ReadTimeout = 0 }},
+		{"write_timeout <= 0", func(c *Config) { c.Daemon.WriteTimeout = 0 }},
+		{"shutdown_timeout <= 0", func(c *Config) { c.Daemon.ShutdownTimeout = 0 }},
+		{"max_request_bytes < 1", func(c *Config) { c.Daemon.MaxRequestBytes = 0 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Default()
+			tc.mutate(c)
+			if err := c.Validate(); err == nil {
+				t.Fatalf("Validate: expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
