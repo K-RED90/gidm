@@ -40,6 +40,12 @@ func TestDestPath(t *testing.T) {
 			url:      "https://example.com/",
 			wantBase: defaultBaseName,
 		},
+		{
+			name:     "url reserved device name escaped",
+			probe:    ProbeInfo{},
+			url:      "https://example.com/files/CON",
+			wantBase: "_CON",
+		},
 	}
 
 	for _, tt := range tests {
@@ -86,6 +92,9 @@ func TestSafeBase(t *testing.T) {
 		"..":                 defaultBaseName,
 		".":                  defaultBaseName,
 		"/":                  defaultBaseName,
+		`a<b>:c?.zip`:        "a_b__c_.zip",
+		"CON":                "_CON",
+		"nul.txt":            "_nul.txt",
 	}
 	for in, want := range tests {
 		if got := safeBase(in); got != want {

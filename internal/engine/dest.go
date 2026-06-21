@@ -29,7 +29,11 @@ func (e *Engine) destPath(probe ProbeInfo, rawURL string) string {
 }
 
 // safeBase collapses an arbitrary name to a single, separator-free filename that
-// cannot traverse out of a directory.
+// cannot traverse out of a directory and is safe to create on Windows. The
+// Windows rules mirror internal/httpx.SanitizeFilename; they are duplicated here
+// rather than shared because the engine must not import the HTTP adapter, and
+// because URL-derived names reach this path without passing through that
+// sanitizer.
 func safeBase(name string) string {
 	// filepath.Clean on "/"+name resolves ".." against the root and drops it;
 	// Base then keeps only the final element.
@@ -37,7 +41,41 @@ func safeBase(name string) string {
 	if cleaned == "." || cleaned == string(filepath.Separator) || cleaned == "" {
 		return defaultBaseName
 	}
+	cleaned = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(windowsForbidden, r) {
+			return '_'
+		}
+		return r
+	}, cleaned)
+	if isReservedName(cleaned) {
+		cleaned = "_" + cleaned
+	}
 	return cleaned
+}
+
+// windowsForbidden lists characters Windows disallows in filenames; we replace
+// them so a name derived from a URL stays portable.
+const windowsForbidden = `<>:"|?*`
+
+// reservedNames are Windows device names that stay reserved even with an
+// extension ("CON.txt" still resolves to the console device).
+var reservedNames = map[string]struct{}{
+	"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
+	"COM1": {}, "COM2": {}, "COM3": {}, "COM4": {}, "COM5": {},
+	"COM6": {}, "COM7": {}, "COM8": {}, "COM9": {},
+	"LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {}, "LPT5": {},
+	"LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
+}
+
+// isReservedName reports whether name's stem (the part before its first dot)
+// matches a Windows reserved device name, case-insensitively.
+func isReservedName(name string) bool {
+	stem := name
+	if i := strings.IndexByte(stem, '.'); i >= 0 {
+		stem = stem[:i]
+	}
+	_, ok := reservedNames[strings.ToUpper(stem)]
+	return ok
 }
 
 // baseFromURL extracts the last element of a URL's path, decoding percent
