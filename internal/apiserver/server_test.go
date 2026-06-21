@@ -27,19 +27,20 @@ type fakeManager struct {
 	downloads map[string]*engine.Download
 	nextID    int
 
-	submitErr error
-	getErr    error
-	listErr   error
-	pauseErr  error
-	resumeErr error
-	cancelErr error
+	submitErr      error
+	getErr         error
+	listErr        error
+	pauseErr       error
+	resumeErr      error
+	cancelErr      error
+	setPriorityErr error
 }
 
 func newFakeManager() *fakeManager {
 	return &fakeManager{downloads: make(map[string]*engine.Download)}
 }
 
-func (f *fakeManager) Submit(_ context.Context, url string) (string, error) {
+func (f *fakeManager) Submit(_ context.Context, url string, priority engine.Priority) (string, error) {
 	if f.submitErr != nil {
 		return "", f.submitErr
 	}
@@ -47,7 +48,7 @@ func (f *fakeManager) Submit(_ context.Context, url string) (string, error) {
 	defer f.mu.Unlock()
 	f.nextID++
 	id := "id-" + string(rune('a'+f.nextID-1))
-	f.downloads[id] = &engine.Download{ID: id, URL: url, Status: engine.StatusQueued}
+	f.downloads[id] = &engine.Download{ID: id, URL: url, Status: engine.StatusQueued, Priority: priority}
 	return id, nil
 }
 
@@ -103,6 +104,20 @@ func (f *fakeManager) Cancel(_ context.Context, id string) error {
 	return f.setStatus(id, engine.StatusCanceled, f.cancelErr)
 }
 
+func (f *fakeManager) SetPriority(_ context.Context, id string, p engine.Priority) error {
+	if f.setPriorityErr != nil {
+		return f.setPriorityErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.downloads[id]
+	if !ok {
+		return engine.ErrNotFound
+	}
+	d.Priority = p
+	return nil
+}
+
 // startServer spins up a real Server on a socket in t.TempDir and returns the
 // socket path. It blocks until the listener is bound so tests never race the
 // Accept loop.
@@ -110,7 +125,7 @@ func startServer(t *testing.T, mgr apiserver.Manager) (*apiserver.Server, string
 	t.Helper()
 	sock := tempSocketPath(t)
 	cfg := config.Daemon{SocketPath: sock} // zero timeouts: New must floor them
-	srv := apiserver.New(mgr, testLogger(), cfg)
+	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
 
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
@@ -257,6 +272,10 @@ func TestErrorCodes(t *testing.T) {
 		{"unknown op", api.Request{Version: api.Version, Op: "frobnicate"}, api.CodeBadRequest},
 		{"bad version", api.Request{Version: 999, Op: api.OpPing}, api.CodeUnsupportedVersion},
 		{"missing add payload", api.Request{Version: api.Version, Op: api.OpAdd}, api.CodeBadRequest},
+		{"set-priority bad value", api.NewSetPriorityRequest("d1", "urgent"), api.CodeBadRequest},
+		{"set-priority empty id", api.NewSetPriorityRequest("  ", api.PriorityHigh), api.CodeBadRequest},
+		{"set-priority missing payload", api.Request{Version: api.Version, Op: api.OpSetPriority}, api.CodeBadRequest},
+		{"set-priority not found", api.NewSetPriorityRequest("missing", api.PriorityHigh), api.CodeNotFound},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -268,6 +287,59 @@ func TestErrorCodes(t *testing.T) {
 				t.Fatalf("code = %q, want %q (msg %q)", resp.Error.Code, tc.code, resp.Error.Message)
 			}
 		})
+	}
+}
+
+// TestPriorityEndToEnd drives add-with-priority and set-priority over the wire and
+// asserts the priority is carried on add, reflected in the status/list views, and
+// updated by set-priority. An add that omits a priority shows the server default.
+func TestPriorityEndToEnd(t *testing.T) {
+	mgr := newFakeManager()
+	_, sock := startServer(t, mgr) // default priority is PriorityNormal
+
+	// add high -> status view shows high
+	addResp := roundTrip(t, sock, api.NewAddRequestWithPriority("https://example.com/f.bin", api.PriorityHigh))
+	if !addResp.OK || addResp.Add == nil {
+		t.Fatalf("add: %+v", addResp)
+	}
+	id := addResp.Add.ID
+	if got := roundTrip(t, sock, api.NewStatusRequest(id)); got.Status.Download.Priority != api.PriorityHigh {
+		t.Fatalf("after add, priority = %q, want high", got.Status.Download.Priority)
+	}
+
+	// set-priority low -> view shows low
+	if r := roundTrip(t, sock, api.NewSetPriorityRequest(id, api.PriorityLow)); !r.OK {
+		t.Fatalf("set-priority: %+v", r)
+	}
+	if got := roundTrip(t, sock, api.NewStatusRequest(id)); got.Status.Download.Priority != api.PriorityLow {
+		t.Fatalf("after set-priority, priority = %q, want low", got.Status.Download.Priority)
+	}
+
+	// add WITHOUT a priority -> the server applies its configured default (normal).
+	plain := roundTrip(t, sock, api.NewAddRequest("https://example.com/g.bin"))
+	if got := roundTrip(t, sock, api.NewStatusRequest(plain.Add.ID)); got.Status.Download.Priority != api.PriorityNormal {
+		t.Fatalf("default-priority add = %q, want normal", got.Status.Download.Priority)
+	}
+}
+
+// TestServerAppliesConfiguredDefaultPriority constructs a server whose default is
+// high and asserts an add that omits a priority is stored at that default — proving
+// the default is config-driven, not hardcoded to normal.
+func TestServerAppliesConfiguredDefaultPriority(t *testing.T) {
+	mgr := newFakeManager()
+	sock := tempSocketPath(t)
+	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityHigh)
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(context.Background()) }()
+	waitListeningOrServeErr(t, sock, served)
+	t.Cleanup(func() { _ = srv.Close(); <-served })
+
+	resp := roundTrip(t, sock, api.NewAddRequest("https://example.com/f.bin"))
+	if !resp.OK || resp.Add == nil {
+		t.Fatalf("add: %+v", resp)
+	}
+	if got := roundTrip(t, sock, api.NewStatusRequest(resp.Add.ID)); got.Status.Download.Priority != api.PriorityHigh {
+		t.Fatalf("add without priority = %q, want high (configured default)", got.Status.Download.Priority)
 	}
 }
 
@@ -326,7 +398,7 @@ func TestOversizedRequestRejected(t *testing.T) {
 	mgr := newFakeManager()
 	sock := tempSocketPath(t)
 	cfg := config.Daemon{SocketPath: sock, MaxRequestBytes: 64} // tiny cap
-	srv := apiserver.New(mgr, testLogger(), cfg)
+	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)

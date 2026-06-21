@@ -53,6 +53,10 @@ type Download struct {
 	MaxRate            int `toml:"max_rate"`
 	PerDownloadMaxRate int `toml:"per_download_max_rate"`
 	RateBurst          int `toml:"rate_burst"`
+
+	// DefaultPriority is applied to a new download whose add request omits a
+	// priority: low | normal | high (empty is treated as normal).
+	DefaultPriority string `toml:"default_priority"`
 }
 
 type Network struct {
@@ -106,6 +110,7 @@ func Default() *Config {
 			WorkStealing:        true,
 			MaxSegments:         64,
 			MinStealSize:        1 << 20, // 1 MiB
+			DefaultPriority:     "normal",
 		},
 		Network: Network{UserAgent: defaultUserAgent},
 		Daemon: Daemon{
@@ -212,6 +217,7 @@ func applyEnv(c *Config) error {
 	num("GIDM_DOWNLOAD_MAX_RATE", &c.Download.MaxRate)
 	num("GIDM_DOWNLOAD_PER_DOWNLOAD_MAX_RATE", &c.Download.PerDownloadMaxRate)
 	num("GIDM_DOWNLOAD_RATE_BURST", &c.Download.RateBurst)
+	str("GIDM_DOWNLOAD_DEFAULT_PRIORITY", &c.Download.DefaultPriority)
 
 	str("GIDM_NETWORK_PROXY_URL", &c.Network.ProxyURL)
 	str("GIDM_NETWORK_USER_AGENT", &c.Network.UserAgent)
@@ -286,6 +292,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Download.RateBurst > 0 && c.Download.RateBurst < c.Download.BufferSize {
 		errs = append(errs, errors.New("download.rate_burst must be >= download.buffer_size (a smaller burst can never admit one buffer)"))
+	}
+	switch c.Download.DefaultPriority {
+	case "", "low", "normal", "high":
+	default:
+		errs = append(errs, fmt.Errorf("download.default_priority %q is invalid (want low|normal|high)", c.Download.DefaultPriority))
 	}
 	if c.Daemon.ReadTimeout <= 0 {
 		errs = append(errs, errors.New("daemon.read_timeout must be > 0"))

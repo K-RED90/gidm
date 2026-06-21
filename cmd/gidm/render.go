@@ -46,10 +46,10 @@ func renderList(w io.Writer, resp api.Response, asJSON bool) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tPROGRESS\tSIZE\tDESTINATION")
+	_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tPRIORITY\tPROGRESS\tSIZE\tDESTINATION")
 	for _, d := range resp.List.Downloads {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			d.ID, d.Status, progress(d), humanBytes(d.TotalSize), destination(d))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			d.ID, d.Status, d.Priority, progress(d), humanBytes(d.TotalSize), destination(d))
 	}
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("render: flush table: %w", err)
@@ -68,6 +68,7 @@ func renderStatus(w io.Writer, resp api.Response, asJSON bool) error {
 	_, _ = fmt.Fprintf(tw, "ID:\t%s\n", d.ID)
 	_, _ = fmt.Fprintf(tw, "URL:\t%s\n", d.URL)
 	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", d.Status)
+	_, _ = fmt.Fprintf(tw, "Priority:\t%s\n", d.Priority)
 	_, _ = fmt.Fprintf(tw, "Progress:\t%s\n", progress(d))
 	_, _ = fmt.Fprintf(tw, "Size:\t%s\n", humanBytes(d.TotalSize))
 	_, _ = fmt.Fprintf(tw, "Destination:\t%s\n", destination(d))

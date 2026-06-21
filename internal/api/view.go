@@ -15,6 +15,19 @@ const (
 	StatusFailed    DownloadStatus = "failed"
 )
 
+// Priority is a download's scheduling priority on the wire. Like DownloadStatus
+// it mirrors internal/engine's Priority as plain strings so the CLI never imports
+// the engine; the daemon's engine<->view mapping is the single translation point.
+// The empty string is treated as PriorityNormal, so a client that omits priority
+// (and an older client unaware of the field) keeps working.
+type Priority string
+
+const (
+	PriorityLow    Priority = "low"
+	PriorityNormal Priority = "normal"
+	PriorityHigh   Priority = "high"
+)
+
 // DownloadView is the pure-data projection of a download returned by status and
 // list. It is deliberately not engine.Download: keeping a separate, flat view
 // keeps this package a leaf and lets the wire shape evolve independently of the
@@ -23,6 +36,7 @@ type DownloadView struct {
 	ID          string         `json:"id"`
 	URL         string         `json:"url"`
 	Status      DownloadStatus `json:"status"`
+	Priority    Priority       `json:"priority"`
 	TotalSize   int64          `json:"total_size"`
 	Downloaded  int64          `json:"downloaded"`
 	Destination string         `json:"destination"`

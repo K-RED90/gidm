@@ -71,3 +71,35 @@ func TestNewRequestStampsVersion(t *testing.T) {
 		t.Errorf("Version = %d, want %d", got, Version)
 	}
 }
+
+func TestAddAndSetPriorityRoundTrip(t *testing.T) {
+	// add carries an explicit priority...
+	add := NewAddRequestWithPriority("https://example.com/f", PriorityHigh)
+	var gotAdd Request
+	roundTripRequest(t, add, &gotAdd)
+	if gotAdd.Add == nil || gotAdd.Add.Priority != PriorityHigh {
+		t.Errorf("add priority = %+v, want high", gotAdd.Add)
+	}
+
+	// ...and set-priority round-trips id + level.
+	sp := NewSetPriorityRequest("d1", PriorityLow)
+	if sp.Op != OpSetPriority {
+		t.Errorf("op = %q, want %q", sp.Op, OpSetPriority)
+	}
+	var gotSP Request
+	roundTripRequest(t, sp, &gotSP)
+	if gotSP.SetPriority == nil || gotSP.SetPriority.ID != "d1" || gotSP.SetPriority.Priority != PriorityLow {
+		t.Errorf("set-priority payload = %+v, want {d1 low}", gotSP.SetPriority)
+	}
+}
+
+func roundTripRequest(t *testing.T, req Request, dst *Request) {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := WriteMessage(&buf, req); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+	if err := ReadMessage(&buf, dst); err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+}

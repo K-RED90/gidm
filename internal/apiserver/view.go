@@ -19,9 +19,40 @@ func toView(d *engine.Download) api.DownloadView {
 		ID:          d.ID,
 		URL:         d.URL,
 		Status:      statusToView(d.Status),
+		Priority:    priorityToView(d.Priority),
 		TotalSize:   d.TotalSize,
 		Downloaded:  downloaded,
 		Destination: d.Destination,
+	}
+}
+
+// priorityToView maps an engine.Priority to the api.Priority wire enum; an
+// out-of-range value (which should never reach the wire) projects to normal.
+func priorityToView(p engine.Priority) api.Priority {
+	switch p {
+	case engine.PriorityLow:
+		return api.PriorityLow
+	case engine.PriorityHigh:
+		return api.PriorityHigh
+	default:
+		return api.PriorityNormal
+	}
+}
+
+// priorityFromView maps a wire priority to an engine.Priority. The empty string
+// resolves to fallback (the server's configured default), so an add that omits
+// priority gets the daemon default rather than a hardcoded normal. Unknown values
+// are already rejected by api.ValidatePriority before this runs.
+func priorityFromView(p api.Priority, fallback engine.Priority) engine.Priority {
+	switch p {
+	case api.PriorityLow:
+		return engine.PriorityLow
+	case api.PriorityNormal:
+		return engine.PriorityNormal
+	case api.PriorityHigh:
+		return engine.PriorityHigh
+	default:
+		return fallback
 	}
 }
 

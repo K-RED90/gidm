@@ -18,6 +18,7 @@ min_steal_size        = 1048576 # don't split a remainder below this many bytes 
 max_rate              = 0       # total download bandwidth cap, bytes/sec; 0 = unlimited (e.g. 5242880 = 5 MiB/s)
 per_download_max_rate = 0       # per-download bandwidth cap, bytes/sec; 0 = unlimited (e.g. 1048576 = 1 MiB/s)
 rate_burst            = 0       # token-bucket capacity, bytes; 0 = derive from rate (floored at 2*buffer_size)
+default_priority      = "normal" # priority for new downloads when none is given: low | normal | high
 
 [network]
 proxy_url       = ""            # e.g. "http://127.0.0.1:8080"; empty = none

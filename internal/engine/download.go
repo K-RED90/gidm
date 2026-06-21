@@ -1,6 +1,9 @@
 package engine
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type Status string
 
@@ -18,12 +21,54 @@ const (
 	StatusCanceled Status = "canceled"
 )
 
+// Priority orders queued downloads: when a concurrency slot frees, the Manager
+// runs the highest-priority queued download, breaking ties by enqueue order
+// (stable FIFO). The zero value is PriorityNormal, so a record persisted before
+// priorities existed (its column defaults to 0) and an add that omits a priority
+// both load as normal. Higher value = scheduled sooner.
+type Priority int
+
+const (
+	PriorityLow    Priority = -1
+	PriorityNormal Priority = 0
+	PriorityHigh   Priority = 1
+)
+
+func (p Priority) Valid() bool { return p >= PriorityLow && p <= PriorityHigh }
+
+func (p Priority) String() string {
+	switch p {
+	case PriorityLow:
+		return "low"
+	case PriorityHigh:
+		return "high"
+	default:
+		return "normal"
+	}
+}
+
+// ParsePriority maps a wire/config spelling to a Priority. The empty string is
+// normal, so an omitted value passes through unchanged as the default.
+func ParsePriority(s string) (Priority, error) {
+	switch s {
+	case "", "normal":
+		return PriorityNormal, nil
+	case "low":
+		return PriorityLow, nil
+	case "high":
+		return PriorityHigh, nil
+	default:
+		return PriorityNormal, fmt.Errorf("engine: invalid priority %q", s)
+	}
+}
+
 type Download struct {
 	ID          string
 	URL         string
 	Destination string
 	TotalSize   int64
 	Status      Status
+	Priority    Priority
 
 	// Revalidated on resume to detect that the remote file changed.
 	ETag         string

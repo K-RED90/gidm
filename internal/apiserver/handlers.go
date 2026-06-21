@@ -29,7 +29,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		if err := api.ValidateAdd(*req.Add); err != nil {
 			return s.toResponse(err), verb, ""
 		}
-		newID, err := s.mgr.Submit(ctx, req.Add.URL)
+		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.defaultPriority))
 		if err != nil {
 			return s.toResponse(err), verb, ""
 		}
@@ -101,6 +101,19 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		}
 		return api.OKResponse(), verb, id
 
+	case api.OpSetPriority:
+		if req.SetPriority == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing set_priority payload"), verb, ""
+		}
+		if err := api.ValidateSetPriority(*req.SetPriority); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		id = req.SetPriority.ID
+		if err := s.mgr.SetPriority(ctx, id, priorityFromView(req.SetPriority.Priority, s.defaultPriority)); err != nil {
+			return s.toResponse(err), verb, id
+		}
+		return api.OKResponse(), verb, id
+
 	case api.OpPing:
 		// Health/version only — no Manager call. This also answers the
 		// single-instance liveness probe a starting daemon sends.
@@ -125,6 +138,8 @@ func (s *Server) toResponse(err error) api.Response {
 		return api.ErrorResponse(api.CodeBadRequest, "url must be an absolute http or https URL")
 	case errors.Is(err, api.ErrEmptyID):
 		return api.ErrorResponse(api.CodeBadRequest, "id must be non-empty")
+	case errors.Is(err, api.ErrInvalidPriority):
+		return api.ErrorResponse(api.CodeBadRequest, "priority must be low, normal, or high")
 	default:
 		// ErrManagerClosed and any unanticipated failure fall here: log the detail,
 		// return a generic message.

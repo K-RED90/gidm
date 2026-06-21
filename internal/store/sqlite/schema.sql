@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS downloads (
 	last_modified TEXT NOT NULL,
 	checksum      TEXT NOT NULL,
 	created_at    TEXT NOT NULL,
-	updated_at    TEXT NOT NULL
+	updated_at    TEXT NOT NULL,
+	priority      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS segments (

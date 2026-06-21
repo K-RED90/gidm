@@ -10,13 +10,14 @@ const Version = 1
 type Op string
 
 const (
-	OpAdd    Op = "add"
-	OpList   Op = "list"
-	OpStatus Op = "status"
-	OpPause  Op = "pause"
-	OpResume Op = "resume"
-	OpRm     Op = "rm"
-	OpPing   Op = "ping" // health check
+	OpAdd         Op = "add"
+	OpList        Op = "list"
+	OpStatus      Op = "status"
+	OpPause       Op = "pause"
+	OpResume      Op = "resume"
+	OpRm          Op = "rm"
+	OpSetPriority Op = "set-priority"
+	OpPing        Op = "ping" // health check
 )
 
 // Request is the envelope-with-op wire request. Op selects the verb; the
@@ -27,15 +28,19 @@ type Request struct {
 	Version int `json:"version"`
 	Op      Op  `json:"op"`
 
-	Add    *Add    `json:"add,omitempty"`
-	Status *Status `json:"status,omitempty"`
-	Pause  *Pause  `json:"pause,omitempty"`
-	Resume *Resume `json:"resume,omitempty"`
-	Rm     *Rm     `json:"rm,omitempty"`
+	Add         *Add         `json:"add,omitempty"`
+	Status      *Status      `json:"status,omitempty"`
+	Pause       *Pause       `json:"pause,omitempty"`
+	Resume      *Resume      `json:"resume,omitempty"`
+	Rm          *Rm          `json:"rm,omitempty"`
+	SetPriority *SetPriority `json:"set_priority,omitempty"`
 }
 
 type Add struct {
 	URL string `json:"url"`
+	// Priority is optional; an empty value means PriorityNormal, so an older
+	// client that omits the field still produces a valid normal-priority add.
+	Priority Priority `json:"priority,omitempty"`
 }
 
 type Status struct {
@@ -54,10 +59,20 @@ type Rm struct {
 	ID string `json:"id"`
 }
 
-// NewAddRequest builds a well-formed add request, stamping Version and Op so
-// callers and tests construct envelopes one way.
+type SetPriority struct {
+	ID       string   `json:"id"`
+	Priority Priority `json:"priority"`
+}
+
+// NewAddRequest builds a well-formed add request at normal priority, stamping
+// Version and Op so callers and tests construct envelopes one way.
 func NewAddRequest(url string) Request {
 	return Request{Version: Version, Op: OpAdd, Add: &Add{URL: url}}
+}
+
+// NewAddRequestWithPriority is NewAddRequest with an explicit priority.
+func NewAddRequestWithPriority(url string, p Priority) Request {
+	return Request{Version: Version, Op: OpAdd, Add: &Add{URL: url, Priority: p}}
 }
 
 func NewListRequest() Request {
@@ -78,6 +93,10 @@ func NewResumeRequest(id string) Request {
 
 func NewRmRequest(id string) Request {
 	return Request{Version: Version, Op: OpRm, Rm: &Rm{ID: id}}
+}
+
+func NewSetPriorityRequest(id string, p Priority) Request {
+	return Request{Version: Version, Op: OpSetPriority, SetPriority: &SetPriority{ID: id, Priority: p}}
 }
 
 func NewPingRequest() Request {
