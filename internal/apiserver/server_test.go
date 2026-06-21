@@ -130,6 +130,14 @@ func startServer(t *testing.T, mgr apiserver.Manager) (*apiserver.Server, string
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListeningOrServeErr(t, sock, served)
+	// The socket is dialable the instant net.Listen returns, which can be a hair
+	// before Serve publishes the listener; wait for Addr so a caller (e.g. the
+	// unix-not-tcp assertion) never observes a nil listener.
+	for deadline := time.Now().Add(2 * time.Second); srv.Addr() == nil; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("server did not publish its listener address")
+		}
+	}
 	t.Cleanup(func() {
 		_ = srv.Close()
 		<-served
