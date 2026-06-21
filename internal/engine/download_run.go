@@ -465,8 +465,12 @@ func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, p
 				if steal != nil {
 					// Persist the split off the coordinator mutex so a slow store never
 					// stalls dispatch; a torn write is healed by repairLayout on resume.
-					_ = e.store.UpdateSegment(runCtx, dl.ID, steal.donor)
-					_ = e.store.UpdateSegment(runCtx, dl.ID, steal.tail)
+					// Detach from runCtx so a cancel racing these writes cannot abort one
+					// mid-query and wedge the connection; the cap bounds a stuck store.
+					persistCtx, pc := context.WithTimeout(context.WithoutCancel(runCtx), checkpointWriteTimeout)
+					_ = e.store.UpdateSegment(persistCtx, dl.ID, steal.donor)
+					_ = e.store.UpdateSegment(persistCtx, dl.ID, steal.tail)
+					pc()
 				}
 				if err := e.runSegment(runCtx, dl, idx, part, prog, coord, limiter); err != nil {
 					fail(err)
