@@ -24,4 +24,20 @@
 // asserts every ranged segment reached its end (and, for a known size, that the
 // bytes sum to TotalSize) before the .part is renamed, so a body ending in a clean
 // EOF short of its range fails the download instead of renaming a truncated file.
+//
+// Supervision (M2): the Manager type turns the engine's one-shot, blocking
+// Download into managed, concurrent background jobs while reusing the same Store,
+// Download, and Status types. A bounded pool of MaxConcurrent workers runs at
+// most N downloads at once; each download still fans into SegmentsPerDownload
+// segments internally, so the two concurrency knobs stay distinct. The Manager
+// holds no package-level mutable state: a single mutex guards its per-job cancel
+// functions (one per active job), its started/closed flags, and its live
+// in-memory progress registry. Live progress is surfaced from the engine's
+// existing per-segment atomic counters through a pure, engine-defined observer
+// hook (progressObserver) the Manager registers — no extra store writes are added
+// and the checkpoint cadence is unchanged. Start performs crash recovery
+// (re-enqueueing every download left active or queued) and Shutdown cancels
+// in-flight transfers through their contexts, drains the workers, and leaves
+// persisted state consistent with .part files intact, so nothing is mismarked
+// failed and nothing leaks. See manager.go for the full lifecycle state machine.
 package engine
