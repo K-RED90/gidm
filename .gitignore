@@ -1,0 +1,27 @@
+# Binaries & build output
+/bin/
+*.exe
+*.test
+*.out
+
+# Go workspace (added in M5)
+go.work
+go.work.sum
+
+# Coverage
+coverage.txt
+*.cover
+
+# Runtime data
+*.db
+*.sock
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Node (extension / desktop frontends)
+node_modules/
+dist/
