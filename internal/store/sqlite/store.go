@@ -65,6 +65,50 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("sqlite: create schema: %w", err)
 	}
+	// Additive migration: CREATE TABLE IF NOT EXISTS won't add a column to a table
+	// from an earlier schema, so add downloads.priority when a pre-existing database
+	// lacks it. The DEFAULT 0 is PriorityNormal, so rows written before priorities
+	// existed load as normal.
+	if err := s.ensureColumn(ctx, "downloads", "priority", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureColumn adds column to table when a pre-existing database lacks it, keeping
+// the embedded schema (which only creates tables IF NOT EXISTS) additive across
+// upgrades. It is idempotent: it inspects PRAGMA table_info and runs ALTER TABLE
+// only when the column is absent. table, column, and def are trusted compile-time
+// constants, not user input, so interpolating them into the DDL is safe (SQLite
+// cannot bind identifiers as placeholders).
+func (s *Store) ensureColumn(ctx context.Context, table, column, def string) error {
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s);", table))
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect %s: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			cid, notnull, pk int
+			name, ctype      string
+			dflt             sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("sqlite: inspect %s: %w", table, err)
+		}
+		if name == column {
+			return nil // already present
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("sqlite: inspect %s: %w", table, err)
+	}
+
+	alter := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;", table, column, def)
+	if _, err := s.db.ExecContext(ctx, alter); err != nil {
+		return fmt.Errorf("sqlite: add column %s.%s: %w", table, column, err)
+	}
 	return nil
 }
 

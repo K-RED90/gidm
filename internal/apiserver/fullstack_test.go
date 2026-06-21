@@ -62,7 +62,7 @@ func TestFullStackEndToEnd(t *testing.T) {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := tempSocketPath(t)
-	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock})
+	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityNormal)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)

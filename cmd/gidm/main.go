@@ -104,11 +104,17 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 	rest := args[1:]
 	switch cmd {
 	case "add":
-		url, code := oneArg(stderr, "add", "<url>", rest)
-		if code != exitOK {
-			return code
+		fs := flag.NewFlagSet("add", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		priority := fs.String("priority", "", "download priority: low | normal | high (default normal)")
+		if err := fs.Parse(rest); err != nil {
+			return exitBadRequest
 		}
-		return runCommand(c, asJSON, stdout, stderr, api.NewAddRequest(url),
+		if fs.NArg() != 1 {
+			_, _ = fmt.Fprintln(stderr, "gidm: add requires exactly one argument: add [--priority low|normal|high] <url>")
+			return exitBadRequest
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewAddRequestWithPriority(fs.Arg(0), api.Priority(*priority)),
 			func(w io.Writer, r api.Response) error { return renderAdd(w, r, asJSON) })
 	case "list":
 		if code := noArgs(stderr, "list", rest); code != exitOK {
@@ -144,6 +150,13 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 		}
 		return runCommand(c, asJSON, stdout, stderr, api.NewRmRequest(id),
 			func(w io.Writer, r api.Response) error { return renderAck(w, r, "removed", id, asJSON) })
+	case "set-priority":
+		id, level, code := twoArgs(stderr, "set-priority", "<id> <low|normal|high>", rest)
+		if code != exitOK {
+			return code
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewSetPriorityRequest(id, api.Priority(level)),
+			func(w io.Writer, r api.Response) error { return renderAck(w, r, "priority set", id, asJSON) })
 	default:
 		_, _ = fmt.Fprintf(stderr, "gidm: unknown command %q\n", cmd)
 		return exitBadRequest
@@ -222,6 +235,21 @@ func oneArg(stderr io.Writer, cmd, arg string, rest []string) (string, int) {
 	return fs.Arg(0), exitOK
 }
 
+// twoArgs validates that rest holds exactly two positional arguments and returns
+// them; otherwise it prints a usage line and a non-zero code.
+func twoArgs(stderr io.Writer, cmd, args string, rest []string) (string, string, int) {
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(rest); err != nil {
+		return "", "", exitBadRequest
+	}
+	if fs.NArg() != 2 {
+		_, _ = fmt.Fprintf(stderr, "gidm: %s requires exactly two arguments: %s %s\n", cmd, cmd, args)
+		return "", "", exitBadRequest
+	}
+	return fs.Arg(0), fs.Arg(1), exitOK
+}
+
 // noArgs validates that a subcommand takes no positional arguments.
 func noArgs(stderr io.Writer, cmd string, rest []string) int {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
@@ -240,12 +268,13 @@ func usage(w io.Writer, gf *flag.FlagSet) {
 	_, _ = fmt.Fprintf(w, "gidm %s — Go Internet Download Manager\n\n", version)
 	_, _ = fmt.Fprintln(w, "Usage: gidm [global flags] <command> [args]")
 	_, _ = fmt.Fprintln(w, "\nCommands:")
-	_, _ = fmt.Fprintln(w, "  add <url>      queue a download and print its id")
-	_, _ = fmt.Fprintln(w, "  list           list all downloads")
-	_, _ = fmt.Fprintln(w, "  status <id>    show one download (alias: get)")
-	_, _ = fmt.Fprintln(w, "  pause <id>     pause a download")
-	_, _ = fmt.Fprintln(w, "  resume <id>    resume a paused download")
-	_, _ = fmt.Fprintln(w, "  rm <id>        cancel and remove a download")
+	_, _ = fmt.Fprintln(w, "  add [--priority L] <url>   queue a download (L: low|normal|high) and print its id")
+	_, _ = fmt.Fprintln(w, "  list                       list all downloads")
+	_, _ = fmt.Fprintln(w, "  status <id>                show one download (alias: get)")
+	_, _ = fmt.Fprintln(w, "  pause <id>                 pause a download")
+	_, _ = fmt.Fprintln(w, "  resume <id>                resume a paused download")
+	_, _ = fmt.Fprintln(w, "  rm <id>                    cancel and remove a download")
+	_, _ = fmt.Fprintln(w, "  set-priority <id> <L>      change priority (L: low|normal|high)")
 	_, _ = fmt.Fprintln(w, "\nGlobal flags:")
 	gf.PrintDefaults()
 }

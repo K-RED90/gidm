@@ -52,7 +52,8 @@ func assertDownloadEqual(t *testing.T, got, want *engine.Download) {
 
 	if got.ID != want.ID || got.URL != want.URL || got.Destination != want.Destination ||
 		got.TotalSize != want.TotalSize || got.Status != want.Status || got.ETag != want.ETag ||
-		got.LastModified != want.LastModified || got.Checksum != want.Checksum {
+		got.LastModified != want.LastModified || got.Checksum != want.Checksum ||
+		got.Priority != want.Priority {
 		t.Errorf("scalar fields mismatch:\n got=%+v\nwant=%+v", got, want)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {

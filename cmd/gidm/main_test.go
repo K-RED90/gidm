@@ -74,7 +74,7 @@ func newHarness(t *testing.T) *testHarness {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := shortSocketPath(t)
-	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock})
+	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock}, engine.PriorityNormal)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -146,7 +146,7 @@ func newSlowHarness(t *testing.T) *testHarness {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := shortSocketPath(t)
-	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock})
+	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock}, engine.PriorityNormal)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -380,13 +380,73 @@ func TestPauseResumeRmHumanAndJSON(t *testing.T) {
 	})
 }
 
+// TestPriorityCLI exercises the --priority flag on add and the set-priority
+// subcommand end to end, asserting priority is surfaced in status/list and updated
+// by set-priority, and that an invalid level is rejected as a bad request.
+func TestPriorityCLI(t *testing.T) {
+	h := newHarness(t)
+
+	code, stdout, stderr := h.runCLI("add", "--priority", "high", h.fileURL)
+	if code != 0 {
+		t.Fatalf("add --priority exit = %d, stderr=%q", code, stderr)
+	}
+	id := strings.TrimSpace(stdout)
+	if id == "" {
+		t.Fatalf("add printed no id; stdout=%q", stdout)
+	}
+
+	// Human status shows the Priority line; JSON status carries the typed value.
+	_, statusOut, _ := h.runCLI("status", id)
+	if !strings.Contains(statusOut, "Priority") || !strings.Contains(statusOut, "high") {
+		t.Errorf("status missing Priority/high: %q", statusOut)
+	}
+	_, jsonOut, _ := h.runCLI("--json", "status", id)
+	var sr api.StatusResult
+	if err := decodeJSON(jsonOut, &sr); err != nil {
+		t.Fatalf("decode status json: %v (%q)", err, jsonOut)
+	}
+	if sr.Download.Priority != api.PriorityHigh {
+		t.Errorf("status json priority = %q, want high", sr.Download.Priority)
+	}
+
+	// The list table gained a PRIORITY column.
+	_, listOut, _ := h.runCLI("list")
+	if !strings.Contains(listOut, "PRIORITY") || !strings.Contains(listOut, "high") {
+		t.Errorf("list missing PRIORITY column/value: %q", listOut)
+	}
+
+	// set-priority low -> ack, then status reflects it.
+	code, stdout, stderr = h.runCLI("set-priority", id, "low")
+	if code != 0 {
+		t.Fatalf("set-priority exit = %d, stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stdout, "priority set") || !strings.Contains(stdout, id) {
+		t.Errorf("set-priority ack = %q, want 'priority set' + id", stdout)
+	}
+	if _, out, _ := h.runCLI("status", id); !strings.Contains(out, "low") {
+		t.Errorf("status after set-priority = %q, want low", out)
+	}
+
+	// --json set-priority is a bare ok ack.
+	if code, out, _ := h.runCLI("--json", "set-priority", id, "normal"); code != 0 || !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("set-priority --json exit=%d out=%q", code, out)
+	}
+
+	// An invalid level is rejected by the daemon as a bad request (exit 2).
+	if code, _, _ := h.runCLI("set-priority", id, "urgent"); code != 2 {
+		t.Errorf("set-priority urgent exit = %d, want 2 (bad request)", code)
+	}
+}
+
 func TestArityErrors(t *testing.T) {
 	h := newHarness(t)
 	cases := [][]string{
-		{"add"},           // missing url
-		{"status"},        // missing id
-		{"list", "extra"}, // list takes none
-		{"bogus"},         // unknown command
+		{"add"},                  // missing url
+		{"status"},               // missing id
+		{"list", "extra"},        // list takes none
+		{"set-priority"},         // missing id and level
+		{"set-priority", "only"}, // missing level
+		{"bogus"},                // unknown command
 	}
 	for _, args := range cases {
 		code, _, stderr := h.runCLI(args...)

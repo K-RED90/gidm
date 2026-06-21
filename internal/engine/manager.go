@@ -15,14 +15,17 @@ import (
 // the engine's dependency invariant trivially intact (engine imports only the
 // standard library and internal/config).
 //
-// Concurrency model. A bounded worker pool of MaxConcurrent goroutines drains a
-// queue of download IDs; at most MaxConcurrent downloads are active at once
-// while the rest stay queued. (MaxConcurrent bounds downloads; the engine's
-// SegmentsPerDownload independently bounds the segment goroutines within one
-// download — the two knobs are distinct.) All mutable Manager state is guarded
-// by a single mutex: the per-job cancel functions (exactly one per active job),
-// the started/closed flags, and the live-progress registry. No package-level
-// mutable state exists; the engine's progressObserver hook is registered once at
+// Concurrency model. A bounded worker pool of MaxConcurrent goroutines pulls from
+// a priority-ordered pending set; at most MaxConcurrent downloads are active at
+// once while the rest wait, and a freeing slot always picks up the
+// highest-priority queued download (ties broken by enqueue order — stable FIFO).
+// (MaxConcurrent bounds downloads; the engine's SegmentsPerDownload independently
+// bounds the segment goroutines within one download — the two knobs are
+// distinct.) All mutable Manager state is guarded by a single mutex: the pending
+// set and its FIFO sequence counter, the per-job cancel functions (exactly one
+// per active job), the started/closed flags, and the live-progress registry;
+// idle workers wait on a sync.Cond over that same mutex. No package-level mutable
+// state exists; the engine's progressObserver hook is registered once at
 // construction.
 //
 // Lifecycle state machine:
@@ -47,7 +50,7 @@ import (
 // state stays consistent and .part files are left intact, so a later Start (or
 // Resume) picks up exactly where the transfers were interrupted. No goroutine or
 // open file handle leaks: the engine closes its *os.File on every exit path and
-// every worker returns once the queue is closed.
+// every worker returns once the manager is closed.
 type Manager struct {
 	engine *Engine
 	store  Store
@@ -60,9 +63,10 @@ type Manager struct {
 	// construction, so it is read-only thereafter and needs no lock.
 	logger *slog.Logger
 
-	queue chan string
-
 	mu       sync.Mutex
+	cond     *sync.Cond // signalled when work is enqueued or the manager closes
+	pending  []pendingItem
+	seq      uint64 // monotonic enqueue counter; the stable FIFO tiebreak
 	started  bool
 	closed   bool
 	cancels  map[string]context.CancelFunc // one per active job
@@ -73,12 +77,13 @@ type Manager struct {
 	workers  sync.WaitGroup
 }
 
-// queueCapacity sizes the job channel. It is generous (not a tunable knob) so a
-// burst of Submits or a recovery sweep never blocks the caller; jobs beyond
-// MaxConcurrent simply wait their turn as queued. Submit never blocks on a full
-// queue because it grows the channel only conceptually — see Submit, which
-// returns a wrapped error rather than blocking if the buffer is somehow full.
-const queueCapacity = 1024
+// pendingItem is one queued download awaiting a free slot. seq orders items of
+// equal priority by enqueue time, so the dispatch tiebreak is a stable FIFO.
+type pendingItem struct {
+	id       string
+	priority Priority
+	seq      uint64
+}
 
 // NewManager builds a supervisor over an engine and its store, bounding
 // concurrent downloads by maxConcurrent (typically cfg.Download.MaxConcurrent).
@@ -94,11 +99,11 @@ func NewManager(e *Engine, store Store, maxConcurrent int) *Manager {
 		store:   store,
 		max:     maxConcurrent,
 		logger:  slog.Default(),
-		queue:   make(chan string, queueCapacity),
 		cancels: make(map[string]context.CancelFunc),
 		intents: make(map[string]Status),
 		live:    make(map[string]*segProgress),
 	}
+	m.cond = sync.NewCond(&m.mu)
 	e.observer = m
 	return m
 }
@@ -117,10 +122,13 @@ func (m *Manager) SetLogger(l *slog.Logger) {
 // wrapped error instead of a panic on a closed queue.
 var ErrManagerClosed = errors.New("engine: manager is shut down")
 
-// Start launches the worker pool and performs crash recovery. It derives the
+// Start performs crash recovery and then launches the worker pool. It derives the
 // Manager's base context from ctx (cancelling it on Shutdown aborts every
-// in-flight transfer), then re-enqueues every persisted download still active or
-// queued. Calling Start more than once, or after Shutdown, returns an error.
+// in-flight transfer), re-enqueues every persisted download still active or
+// queued, and only then spawns the workers — so they pull from a fully seeded,
+// priority-ordered pending set and recovery dispatch is deterministic by priority
+// (rather than racing the recovery sweep). Calling Start more than once, or after
+// Shutdown, returns an error.
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	if m.closed {
@@ -133,13 +141,21 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.started = true
 	m.baseCtx, m.baseStop = context.WithCancel(context.WithoutCancel(ctx))
+	m.mu.Unlock()
+
+	// Seed the pending set before any worker exists so the first slots go to the
+	// highest-priority recovered downloads; a recover error leaves no idle workers.
+	if err := m.recover(ctx); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
 	for i := 0; i < m.max; i++ {
 		m.workers.Add(1)
 		go m.worker()
 	}
 	m.mu.Unlock()
-
-	return m.recover(ctx)
+	return nil
 }
 
 // recover re-enqueues downloads a crash or prior shutdown left in flight so they
@@ -152,7 +168,7 @@ func (m *Manager) recover(ctx context.Context) error {
 	}
 	for _, d := range list {
 		if d.Status == StatusActive || d.Status == StatusQueued {
-			if err := m.enqueue(d.ID); err != nil {
+			if err := m.enqueue(d.ID, d.Priority); err != nil {
 				return err
 			}
 		}
@@ -160,9 +176,9 @@ func (m *Manager) recover(ctx context.Context) error {
 	return nil
 }
 
-// Submit persists a new queued download and enqueues it, returning its ID
-// immediately without blocking on the transfer.
-func (m *Manager) Submit(ctx context.Context, url string) (string, error) {
+// Submit persists a new queued download at the given priority and enqueues it,
+// returning its ID immediately without blocking on the transfer.
+func (m *Manager) Submit(ctx context.Context, url string, priority Priority) (string, error) {
 	id, err := newID()
 	if err != nil {
 		return "", err
@@ -172,35 +188,34 @@ func (m *Manager) Submit(ctx context.Context, url string) (string, error) {
 		ID:        id,
 		URL:       url,
 		Status:    StatusQueued,
+		Priority:  priority,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	if err := m.store.SaveDownload(ctx, dl); err != nil {
 		return "", fmt.Errorf("engine: manager submit %q: %w", url, err)
 	}
-	if err := m.enqueue(id); err != nil {
+	if err := m.enqueue(id, priority); err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
-// enqueue offers a job ID to the worker pool without blocking. The closed check
-// and the non-blocking send happen under the same lock that Shutdown holds while
-// closing the channel, so a send can never race a close (no panic on a closed
-// channel). It returns ErrManagerClosed after Shutdown and a wrapped error if the
-// buffer is full (the supervisor is saturated far beyond MaxConcurrent).
-func (m *Manager) enqueue(id string) error {
+// enqueue adds a job to the priority-ordered pending set and wakes one idle
+// worker. The closed check, the append, and the signal all happen under the
+// mutex that Shutdown also holds, so an enqueue can never race a close. It
+// returns ErrManagerClosed after Shutdown. The set is unbounded, so a burst of
+// Submits or a recovery sweep never blocks the caller.
+func (m *Manager) enqueue(id string, priority Priority) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return ErrManagerClosed
 	}
-	select {
-	case m.queue <- id:
-		return nil
-	default:
-		return fmt.Errorf("engine: manager queue full (%d): %q", queueCapacity, id)
-	}
+	m.seq++
+	m.pending = append(m.pending, pendingItem{id: id, priority: priority, seq: m.seq})
+	m.cond.Signal()
+	return nil
 }
 
 // List returns every persisted download with live in-memory progress folded in
@@ -330,7 +345,35 @@ func (m *Manager) Resume(ctx context.Context, id string) error {
 	if err := m.store.SaveDownload(ctx, d); err != nil {
 		return fmt.Errorf("engine: manager resume persist %q: %w", id, err)
 	}
-	return m.enqueue(id)
+	return m.enqueue(id, d.Priority)
+}
+
+// SetPriority changes a download's priority and persists it. A queued download is
+// reordered immediately: its pending entry is updated, so the next freeing slot
+// honors the new priority. An active download is NOT preempted — only its record
+// is updated, so the new priority takes effect if it is later re-queued (a
+// pause→resume or a crash recovery). Persisting before the in-memory reorder
+// keeps the store authoritative even if the job settles concurrently.
+func (m *Manager) SetPriority(ctx context.Context, id string, priority Priority) error {
+	d, err := m.store.LoadDownload(ctx, id)
+	if err != nil {
+		return fmt.Errorf("engine: manager set-priority %q: %w", id, err)
+	}
+	d.Priority = priority
+	d.UpdatedAt = time.Now().UTC()
+	if err := m.store.SaveDownload(ctx, d); err != nil {
+		return fmt.Errorf("engine: manager set-priority persist %q: %w", id, err)
+	}
+
+	m.mu.Lock()
+	for i := range m.pending {
+		if m.pending[i].id == id {
+			m.pending[i].priority = priority // reordering is resolved lazily at pop time
+			break
+		}
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 // Shutdown stops intake, cancels every in-flight transfer through the base
@@ -344,7 +387,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	m.closed = true
-	close(m.queue) // workers finish the current job, then range exits
+	m.cond.Broadcast() // wake every idle worker so it observes closed and returns
 	if m.baseStop != nil {
 		m.baseStop() // abort in-flight transfers via their contexts
 	}
@@ -364,13 +407,48 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	}
 }
 
-// worker drains the job queue until it is closed, running one download at a time.
-// Because exactly m.max workers run, at most m.max downloads are active at once.
+// worker runs one download at a time, always picking the highest-priority queued
+// download when a slot frees. It waits on the condition variable while the
+// pending set is empty and returns once the manager is closed. Because exactly
+// m.max workers run, at most m.max downloads are active at once.
 func (m *Manager) worker() {
 	defer m.workers.Done()
-	for id := range m.queue {
+	for {
+		m.mu.Lock()
+		for len(m.pending) == 0 && !m.closed {
+			m.cond.Wait()
+		}
+		if m.closed {
+			// Shutting down: leave any still-pending items in the store as
+			// queued/active so a later Start re-enqueues them; do not drain them here.
+			m.mu.Unlock()
+			return
+		}
+		id := m.popHighest()
+		m.mu.Unlock()
 		m.run(id)
 	}
+}
+
+// popHighest removes and returns the id of the highest-priority pending item,
+// breaking ties by lowest seq (stable FIFO). The caller must hold m.mu and must
+// have checked that pending is non-empty. The scan is O(len(pending)) but runs
+// only when a slot frees — a cold path well off the per-chunk transfer loop — so
+// a linear select beats a heap's per-mutation bookkeeping at this scale.
+func (m *Manager) popHighest() string {
+	best := 0
+	for i := 1; i < len(m.pending); i++ {
+		if m.pending[i].priority > m.pending[best].priority ||
+			(m.pending[i].priority == m.pending[best].priority && m.pending[i].seq < m.pending[best].seq) {
+			best = i
+		}
+	}
+	id := m.pending[best].id
+	last := len(m.pending) - 1
+	m.pending[best] = m.pending[last]
+	m.pending[last] = pendingItem{} // drop the reference so the id can be GC'd
+	m.pending = m.pending[:last]
+	return id
 }
 
 // run executes a single job: it loads the record, marks it active, derives a

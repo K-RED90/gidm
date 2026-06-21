@@ -244,6 +244,49 @@ func TestWorkStealingValidation(t *testing.T) {
 	})
 }
 
+func TestDefaultPriorityDefaultsToNormal(t *testing.T) {
+	c := Default()
+	if c.Download.DefaultPriority != "normal" {
+		t.Errorf("default default_priority = %q, want normal", c.Download.DefaultPriority)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("default config is invalid: %v", err)
+	}
+}
+
+func TestDefaultPriorityLayering(t *testing.T) {
+	path := writeTempConfig(t, "[download]\ndefault_priority = \"low\"\n")
+	t.Setenv("GIDM_CONFIG", path)
+	t.Setenv("GIDM_DOWNLOAD_DEFAULT_PRIORITY", "high") // env overrides file
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Download.DefaultPriority != "high" {
+		t.Errorf("default_priority = %q, want high (env over file)", c.Download.DefaultPriority)
+	}
+}
+
+func TestDefaultPriorityValidation(t *testing.T) {
+	t.Run("rejects an unknown level", func(t *testing.T) {
+		c := Default()
+		c.Download.DefaultPriority = "urgent"
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate: expected error for an invalid default_priority, got nil")
+		}
+	})
+	for _, level := range []string{"", "low", "normal", "high"} {
+		t.Run("accepts "+level, func(t *testing.T) {
+			c := Default()
+			c.Download.DefaultPriority = level
+			if err := c.Validate(); err != nil {
+				t.Errorf("Validate(default_priority=%q) = %v, want nil", level, err)
+			}
+		})
+	}
+}
+
 func TestDaemonTunablesValidation(t *testing.T) {
 	tests := []struct {
 		name   string

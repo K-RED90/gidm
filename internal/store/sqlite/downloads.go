@@ -27,7 +27,7 @@ func (s *Store) SaveDownload(ctx context.Context, d *engine.Download) error {
 	_, err = tx.ExecContext(ctx, upsertDownload,
 		d.ID, d.URL, d.Destination, d.TotalSize, string(d.Status),
 		d.ETag, d.LastModified, d.Checksum,
-		formatTime(d.CreatedAt), formatTime(d.UpdatedAt),
+		formatTime(d.CreatedAt), formatTime(d.UpdatedAt), int(d.Priority),
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: save download %q: %w", d.ID, err)
@@ -113,14 +113,16 @@ func scanDownload(sc rowScanner) (*engine.Download, error) {
 		d                    engine.Download
 		status               string
 		createdAt, updatedAt string
+		priority             int
 	)
 	err := sc.Scan(&d.ID, &d.URL, &d.Destination, &d.TotalSize, &status,
-		&d.ETag, &d.LastModified, &d.Checksum, &createdAt, &updatedAt)
+		&d.ETag, &d.LastModified, &d.Checksum, &createdAt, &updatedAt, &priority)
 	if err != nil {
 		return nil, err
 	}
 
 	d.Status = engine.Status(status)
+	d.Priority = engine.Priority(priority)
 	if d.CreatedAt, err = parseTime(createdAt); err != nil {
 		return nil, fmt.Errorf("created_at %q: %w", createdAt, err)
 	}
@@ -132,8 +134,8 @@ func scanDownload(sc rowScanner) (*engine.Download, error) {
 
 const upsertDownload = `
 INSERT INTO downloads
-	(id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	(id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	url           = excluded.url,
 	destination   = excluded.destination,
@@ -142,14 +144,15 @@ ON CONFLICT(id) DO UPDATE SET
 	etag          = excluded.etag,
 	last_modified = excluded.last_modified,
 	checksum      = excluded.checksum,
-	updated_at    = excluded.updated_at;`
+	updated_at    = excluded.updated_at,
+	priority      = excluded.priority;`
 
 const selectDownload = `
-SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at
+SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority
 FROM downloads WHERE id = ?;`
 
 const selectDownloads = `
-SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at
+SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority
 FROM downloads ORDER BY created_at, id;`
 
 const deleteDownload = `DELETE FROM downloads WHERE id = ?;`

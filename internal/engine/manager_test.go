@@ -60,7 +60,7 @@ func TestManagerSubmitRunsInBackground(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
 	start := time.Now()
-	id, err := m.Submit(context.Background(), "https://example.com/bg.bin")
+	id, err := m.Submit(context.Background(), "https://example.com/bg.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestManagerListReflectsLifecycle(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
-	id, err := m.Submit(context.Background(), "https://example.com/lc.bin")
+	id, err := m.Submit(context.Background(), "https://example.com/lc.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestManagerHonorsMaxConcurrent(t *testing.T) {
 	ids := make([]string, 4)
 	for i := range ids {
 		url := fmt.Sprintf("https://example.com/gate-%d.bin", i)
-		id, err := m.Submit(context.Background(), url)
+		id, err := m.Submit(context.Background(), url, PriorityNormal)
 		if err != nil {
 			t.Fatalf("Submit %d: %v", i, err)
 		}
@@ -267,7 +267,7 @@ func TestManagerPauseKeepsProgressResumeFinishes(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	id, err := m.Submit(context.Background(), "https://example.com/gate.bin")
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestManagerCancelStopsAndKeepsPart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
-	id, err := m.Submit(context.Background(), "https://example.com/gate.bin")
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestManagerShutdownCancelsInFlightNoLeak(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	id, err := m.Submit(context.Background(), "https://example.com/gate.bin")
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestManagerShutdownCancelsInFlightNoLeak(t *testing.T) {
 	close(f.release) // unblock any straggler reads
 
 	// API is closed after shutdown.
-	if _, err := m.Submit(context.Background(), "https://example.com/x"); err == nil {
+	if _, err := m.Submit(context.Background(), "https://example.com/x", PriorityNormal); err == nil {
 		t.Error("Submit after Shutdown should fail with ErrManagerClosed")
 	}
 
@@ -550,8 +550,10 @@ func TestManagerShutdownIdempotentAndDoubleStart(t *testing.T) {
 	}
 }
 
-// raceConcurrentControls stresses Submit/Pause/Resume/Cancel/List/Get under -race
-// to catch data races on the manager's shared maps and state.
+// raceConcurrentControls stresses Submit/SetPriority/Pause/Resume/Cancel/List/Get
+// under -race to catch data races on the manager's shared maps, pending set, and
+// state. Submits carry mixed priorities and SetPriority runs concurrently with
+// dispatch so the priority-queue mutations are exercised under the detector.
 func TestManagerConcurrentControlsRace(t *testing.T) {
 	content := makeContent(1 << 20)
 	f := &fakeFetcher{content: content, supportsRanges: true, sizeKnown: true, etag: `"v1"`, filename: "r.bin"}
@@ -562,6 +564,7 @@ func TestManagerConcurrentControlsRace(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
+	priorities := []Priority{PriorityLow, PriorityNormal, PriorityHigh}
 	ctx := context.Background()
 	var ids sync.Map
 	var wg sync.WaitGroup
@@ -569,12 +572,13 @@ func TestManagerConcurrentControlsRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			id, err := m.Submit(ctx, fmt.Sprintf("https://example.com/r-%d.bin", i))
+			id, err := m.Submit(ctx, fmt.Sprintf("https://example.com/r-%d.bin", i), priorities[i%len(priorities)])
 			if err != nil {
 				return
 			}
 			ids.Store(id, struct{}{})
 			_, _ = m.Get(ctx, id)
+			_ = m.SetPriority(ctx, id, priorities[(i+1)%len(priorities)])
 			_ = m.Pause(ctx, id)
 			_, _ = m.List(ctx)
 			_ = m.Resume(ctx, id)
@@ -603,14 +607,14 @@ func TestManagerPauseQueuedJobNeverRuns(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
 	// Saturate the single worker with a download that blocks on the gate.
-	busy, err := m.Submit(context.Background(), "https://example.com/busy.bin")
+	busy, err := m.Submit(context.Background(), "https://example.com/busy.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit busy: %v", err)
 	}
 	waitStatus(t, m, busy, StatusActive, 3*time.Second)
 
 	// This one cannot be picked up yet (the worker is busy): it stays queued.
-	queued, err := m.Submit(context.Background(), "https://example.com/queued.bin")
+	queued, err := m.Submit(context.Background(), "https://example.com/queued.bin", PriorityNormal)
 	if err != nil {
 		t.Fatalf("Submit queued: %v", err)
 	}
@@ -784,5 +788,282 @@ func TestManagerResumeRejectsNonResumable(t *testing.T) {
 	// An unknown ID surfaces a not-found error, never a panic.
 	if err := m.Resume(ctx, "missing"); err == nil {
 		t.Error("Resume of an unknown ID should error")
+	}
+}
+
+// priorityFetcher records the dispatch order of downloads (one entry per
+// download, by destination filename, on first Probe) and holds the FIRST body it
+// serves open on a gate. A test saturates the single worker with one held
+// download, queues more at mixed priorities, then closes the gate and asserts the
+// order the worker ran them in.
+type priorityFetcher struct {
+	content []byte
+	gate    chan struct{}
+	first   atomic.Bool
+
+	mu    sync.Mutex
+	seen  map[string]bool
+	order []string
+}
+
+func newPriorityFetcher(content []byte) *priorityFetcher {
+	return &priorityFetcher{content: content, gate: make(chan struct{}), seen: map[string]bool{}}
+}
+
+func (f *priorityFetcher) record(url string) {
+	name := baseFromURL(url)
+	f.mu.Lock()
+	if !f.seen[name] {
+		f.seen[name] = true
+		f.order = append(f.order, name)
+	}
+	f.mu.Unlock()
+}
+
+func (f *priorityFetcher) dispatchOrder() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.order...)
+}
+
+func (f *priorityFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
+	f.record(url)
+	return ProbeInfo{FinalURL: url, Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: baseFromURL(url)}, nil
+}
+
+func (f *priorityFetcher) RangeGet(ctx context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+	return f.body(ctx, f.content[start:end+1])
+}
+
+func (f *priorityFetcher) Get(ctx context.Context, _ string) (io.ReadCloser, error) {
+	return f.body(ctx, f.content)
+}
+
+// body holds only the first body open on the gate; every later body returns
+// immediately, so once the gate is closed the queued downloads run back-to-back
+// in dispatch order.
+func (f *priorityFetcher) body(ctx context.Context, data []byte) (io.ReadCloser, error) {
+	if f.first.CompareAndSwap(false, true) {
+		return &gateBody{ctx: ctx, gate: f.gate, data: data}, nil
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+type gateBody struct {
+	ctx      context.Context
+	gate     chan struct{}
+	data     []byte
+	pos      int
+	released bool
+}
+
+func (b *gateBody) Read(p []byte) (int, error) {
+	if !b.released {
+		select {
+		case <-b.ctx.Done():
+			return 0, b.ctx.Err()
+		case <-b.gate:
+			b.released = true
+		}
+	}
+	if b.pos >= len(b.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, b.data[b.pos:])
+	b.pos += n
+	return n, nil
+}
+
+func (b *gateBody) Close() error { return nil }
+
+// singleSegmentCfg is smallDownloadCfg with one segment per download, so each
+// download opens exactly one body and the dispatch order is unambiguous.
+func singleSegmentCfg() config.Download {
+	cfg := smallDownloadCfg()
+	cfg.SegmentsPerDownload = 1
+	return cfg
+}
+
+// TestManagerDispatchesByPriority saturates the single worker with one held
+// download, queues five more at mixed priorities, then releases the gate and
+// asserts the worker ran the queue highest-priority-first with a stable FIFO
+// tiebreak among equal priorities.
+func TestManagerDispatchesByPriority(t *testing.T) {
+	f := newPriorityFetcher(makeContent(64 << 10))
+	m, _, _ := newManager(t, f, singleSegmentCfg(), 1)
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	ctx := context.Background()
+	// Saturate the one worker; its body blocks on the gate so the rest stay queued.
+	blocker, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal)
+	if err != nil {
+		t.Fatalf("Submit blocker: %v", err)
+	}
+	waitStatus(t, m, blocker, StatusActive, 3*time.Second)
+
+	// Queue mixed priorities while the worker is busy. Equal priorities must keep
+	// submission (FIFO) order.
+	queued := []struct {
+		name string
+		pri  Priority
+	}{
+		{"q1.bin", PriorityLow},
+		{"q2.bin", PriorityHigh},
+		{"q3.bin", PriorityNormal},
+		{"q4.bin", PriorityHigh},
+		{"q5.bin", PriorityNormal},
+	}
+	ids := make([]string, len(queued))
+	for i, q := range queued {
+		id, err := m.Submit(ctx, "https://example.com/"+q.name, q.pri)
+		if err != nil {
+			t.Fatalf("Submit %s: %v", q.name, err)
+		}
+		ids[i] = id
+	}
+
+	close(f.gate) // release the blocker; the worker drains the queue by priority
+	for _, id := range append(ids, blocker) {
+		waitStatus(t, m, id, StatusCompleted, 5*time.Second)
+	}
+
+	// blocker ran first (it held the slot); then highs in FIFO, normals in FIFO, low.
+	want := []string{"blocker.bin", "q2.bin", "q4.bin", "q3.bin", "q5.bin", "q1.bin"}
+	if got := f.dispatchOrder(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("dispatch order = %v, want %v", got, want)
+	}
+}
+
+// TestManagerSetPriorityReordersQueued promotes a queued download and asserts the
+// worker then runs it ahead of an equal-priority job submitted earlier.
+func TestManagerSetPriorityReordersQueued(t *testing.T) {
+	f := newPriorityFetcher(makeContent(64 << 10))
+	m, _, _ := newManager(t, f, singleSegmentCfg(), 1)
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	ctx := context.Background()
+	blocker, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal)
+	if err != nil {
+		t.Fatalf("Submit blocker: %v", err)
+	}
+	waitStatus(t, m, blocker, StatusActive, 3*time.Second)
+
+	first, err := m.Submit(ctx, "https://example.com/q1.bin", PriorityLow)
+	if err != nil {
+		t.Fatalf("Submit q1: %v", err)
+	}
+	second, err := m.Submit(ctx, "https://example.com/q2.bin", PriorityLow)
+	if err != nil {
+		t.Fatalf("Submit q2: %v", err)
+	}
+
+	// Promote the later-submitted job above the earlier, equal-priority one.
+	if err := m.SetPriority(ctx, second, PriorityHigh); err != nil {
+		t.Fatalf("SetPriority: %v", err)
+	}
+
+	close(f.gate)
+	for _, id := range []string{blocker, first, second} {
+		waitStatus(t, m, id, StatusCompleted, 5*time.Second)
+	}
+
+	want := []string{"blocker.bin", "q2.bin", "q1.bin"} // q2 promoted ahead of earlier q1
+	if got := f.dispatchOrder(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("dispatch order = %v, want %v", got, want)
+	}
+}
+
+// TestManagerSetPriorityActiveDoesNotPreempt changes a running download's priority
+// and asserts the new value is persisted immediately while the transfer keeps
+// running uninterrupted (no preemption) and completes normally.
+func TestManagerSetPriorityActiveDoesNotPreempt(t *testing.T) {
+	f := newPriorityFetcher(makeContent(64 << 10))
+	m, store, _ := newManager(t, f, singleSegmentCfg(), 1)
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	ctx := context.Background()
+	id, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal)
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitStatus(t, m, id, StatusActive, 3*time.Second)
+
+	if err := m.SetPriority(ctx, id, PriorityHigh); err != nil {
+		t.Fatalf("SetPriority: %v", err)
+	}
+
+	// Persisted immediately, and the running transfer is NOT preempted: it stays
+	// active (the engine's full-record save only runs at start and finish, so the
+	// active run does not clobber this between waitStatus(active) and release).
+	persisted, err := store.LoadDownload(ctx, id)
+	if err != nil {
+		t.Fatalf("LoadDownload: %v", err)
+	}
+	if persisted.Priority != PriorityHigh {
+		t.Errorf("persisted priority = %v, want high", persisted.Priority)
+	}
+	if persisted.Status != StatusActive {
+		t.Errorf("status = %q, want active (set-priority must not preempt a running download)", persisted.Status)
+	}
+
+	close(f.gate)
+	waitStatus(t, m, id, StatusCompleted, 5*time.Second)
+
+	// Exactly one download ran: no second job was started in its place.
+	if got := f.dispatchOrder(); strings.Join(got, ",") != "blocker.bin" {
+		t.Errorf("dispatch order = %v, want just [blocker.bin]", got)
+	}
+}
+
+// TestManagerRecoveryDispatchesByPriority seeds the store with queued downloads at
+// distinct priorities, starts the manager, and asserts recovery dispatched them
+// highest-priority-first. One worker makes the order observable; Start seeds the
+// pending set before spawning workers, so the order is deterministic.
+func TestManagerRecoveryDispatchesByPriority(t *testing.T) {
+	f := newPriorityFetcher(makeContent(64 << 10))
+	close(f.gate) // no held body: every transfer runs as soon as it is dispatched
+	m, store, _ := newManager(t, f, singleSegmentCfg(), 1)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seeds := []struct {
+		id, name string
+		pri      Priority
+	}{
+		{"rlow", "rlow.bin", PriorityLow},
+		{"rhigh", "rhigh.bin", PriorityHigh},
+		{"rnorm", "rnorm.bin", PriorityNormal},
+	}
+	for _, s := range seeds {
+		d := &Download{ID: s.id, URL: "https://example.com/" + s.name, Status: StatusQueued, Priority: s.pri, CreatedAt: now, UpdatedAt: now}
+		if err := store.SaveDownload(ctx, d); err != nil {
+			t.Fatalf("seed %s: %v", s.id, err)
+		}
+	}
+
+	if err := m.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	for _, s := range seeds {
+		waitStatus(t, m, s.id, StatusCompleted, 5*time.Second)
+	}
+
+	want := []string{"rhigh.bin", "rnorm.bin", "rlow.bin"}
+	if got := f.dispatchOrder(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("recovery dispatch order = %v, want %v", got, want)
 	}
 }

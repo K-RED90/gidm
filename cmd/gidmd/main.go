@@ -91,7 +91,14 @@ func serve(cfg *config.Config, log *slog.Logger) error {
 	mgr := engine.NewManager(e, store, cfg.Download.MaxConcurrent)
 	mgr.SetLogger(log)
 
-	srv := apiserver.New(mgr, log, cfg.Daemon)
+	// cfg is already validated, so ParsePriority cannot fail here; resolve the
+	// config default once so the server applies it to adds that omit a priority.
+	defaultPriority, err := engine.ParsePriority(cfg.Download.DefaultPriority)
+	if err != nil {
+		return fmt.Errorf("gidmd: default priority: %w", err)
+	}
+
+	srv := apiserver.New(mgr, log, cfg.Daemon, defaultPriority)
 
 	// Signal-derived context: the first SIGINT/SIGTERM cancels it, beginning the
 	// graceful shutdown sequence below.
