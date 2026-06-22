@@ -2,12 +2,29 @@
 // only module that imports the deep bindings/ paths and the wails runtime. Every
 // component imports daemon calls, the DownloadView type, and the event helpers
 // from here, so the generated paths live in exactly one place.
-import { Dialogs, Events } from '@wailsio/runtime'
+import { Clipboard, Dialogs, Events } from '@wailsio/runtime'
 import { Bridge } from '../../bindings/github.com/K-RED90/gidm/desktop/bridge'
 import { DownloadStatus, Priority, type DownloadView } from '../../bindings/github.com/K-RED90/gidm/api'
 
 export { Bridge, DownloadStatus, Priority }
 export type { DownloadView }
+
+// copyText puts text on the system clipboard (used by the row "Copy URL" action).
+// Clipboard is the frontend Wails runtime module, so no Go round-trip is needed.
+export async function copyText(text: string): Promise<void> {
+  await Clipboard.SetText(text)
+}
+
+// openPath / revealPath ask the Go bridge to open a downloaded file with its
+// default app, or reveal it in the OS file manager. The path comes straight from
+// the download's destination, so no daemon lookup is involved.
+export async function openPath(path: string): Promise<void> {
+  if (path) await Bridge.OpenFile(path)
+}
+
+export async function revealPath(path: string): Promise<void> {
+  if (path) await Bridge.RevealInFolder(path)
+}
 
 // pickDirectory opens the OS folder picker and resolves to the chosen absolute
 // path, or "" when the user cancels. Single seam to the Wails dialog runtime so

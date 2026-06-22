@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { fly } from 'svelte/transition'
   import Icon from './Icon.svelte'
   import { store, type SortDir, type SortKey } from '../lib/store.svelte'
+  import { menu } from '../lib/menu.svelte'
+  import { priorityMenuItems } from '../lib/actions'
 
   let { onAdd }: { onAdd: () => void } = $props()
 
@@ -19,14 +22,54 @@
     SORTS.find((s) => s.key === store.sortKey && s.dir === store.sortDir) ?? SORTS[0],
   )
 
+  // The toolbar morphs into a selection bar whenever rows are selected.
+  const selecting = $derived(store.selectedIds.size > 0)
+  const reduceMotion =
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const flyIn = { y: -6, duration: reduceMotion ? 0 : 130 }
+
   function pickSort(s: (typeof SORTS)[number]): void {
     store.sortKey = s.key
     store.sortDir = s.dir
     sortOpen = false
   }
+
+  // Anchor the Priority menu just below its button.
+  function openPriority(e: MouseEvent): void {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    menu.show(r.left, r.bottom + 4, priorityMenuItems())
+  }
 </script>
 
 <header class="toolbar" style="--wails-draggable: drag">
+  {#if selecting}
+    <div class="selbar" style="--wails-draggable: no-drag" in:fly={flyIn}>
+      <button class="iconbtn" aria-label="Clear selection" title="Clear selection" onclick={() => store.clearSelection()}>
+        <Icon name="close" size={16} />
+      </button>
+      <span class="count">{store.selectedIds.size} selected</span>
+
+      <span class="spacer"></span>
+
+      <button class="ghost" disabled={!store.canPauseSelected} onclick={() => store.pauseSelected()}>
+        <Icon name="pause" size={14} />
+        <span class="lbl">Pause</span>
+      </button>
+      <button class="ghost" disabled={!store.canResumeSelected} onclick={() => store.resumeSelected()}>
+        <Icon name="play" size={14} />
+        <span class="lbl">Resume</span>
+      </button>
+      <button class="ghost" onclick={openPriority} aria-haspopup="menu">
+        <Icon name="sliders" size={14} />
+        <span class="lbl">Priority</span>
+        <Icon name="chevronDown" size={13} />
+      </button>
+      <button class="ghost danger" onclick={() => store.removeSelected()}>
+        <Icon name="trash" size={14} />
+        <span class="lbl">Remove</span>
+      </button>
+    </div>
+  {:else}
   <span class="brand">gidm</span>
 
   <div class="group" style="--wails-draggable: no-drag">
@@ -101,6 +144,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 </header>
 
 <style>
@@ -124,6 +168,43 @@
     letter-spacing: -0.01em;
     color: var(--text);
     padding-right: var(--space-2);
+  }
+
+  /* selection mode: replaces the normal toolbar content */
+  .selbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 1;
+    min-width: 0;
+  }
+  .iconbtn {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .iconbtn:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .count {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .ghost.danger {
+    color: var(--danger);
+  }
+  .ghost.danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+    color: var(--danger);
   }
 
   .group {

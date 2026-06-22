@@ -6,7 +6,7 @@ export {
     NotificationService
 };
 
-export {
+export type {
     NotificationAction,
     NotificationCategory,
     NotificationOptions

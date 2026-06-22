@@ -6,6 +6,7 @@
 export const icons = {
   // actions
   plus: '<path d="M12 5v14M5 12h14"/>',
+  minus: '<path d="M5 12h14"/>',
   download: '<path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
@@ -23,6 +24,10 @@ export const icons = {
   alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
   refresh: '<path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 6.3 2.6L21 8M21 3v5h-5"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5h.01"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+  externalLink: '<path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M19 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4"/>',
+  folderOpen: '<path d="M3 8a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v1H3z"/><path d="M3 11h17.2a1 1 0 0 1 .96 1.27l-1.4 5A2 2 0 0 1 17.84 19H5a2 2 0 0 1-2-2z"/>',
 
   // navigation / sections
   inbox: '<path d="M4 13h4l1.2 2.5h5.6L16 13h4"/><path d="M5.5 13 7 5h10l1.5 8v5a2 2 0 0 1-2 2H7.5a2 2 0 0 1-2-2z"/>',

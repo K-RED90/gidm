@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -76,6 +77,7 @@ type Manager struct {
 	closed   bool
 	cancels  map[string]context.CancelFunc // one per active job
 	intents  map[string]Status             // operator intent (paused/canceled) for an in-flight job
+	deleting map[string]deleteReq          // pending delete for an active job, settled by its worker
 	live     map[string]*segProgress       // live counters for active jobs
 	rates    map[string]*rateState         // smoothed transfer rate per active job
 	baseCtx  context.Context
@@ -101,15 +103,16 @@ func NewManager(e *Engine, store Store, maxConcurrent int) *Manager {
 		maxConcurrent = 1
 	}
 	m := &Manager{
-		engine:  e,
-		store:   store,
-		max:     maxConcurrent,
-		logger:  slog.Default(),
-		clock:   time.Now,
-		cancels: make(map[string]context.CancelFunc),
-		intents: make(map[string]Status),
-		live:    make(map[string]*segProgress),
-		rates:   make(map[string]*rateState),
+		engine:   e,
+		store:    store,
+		max:      maxConcurrent,
+		logger:   slog.Default(),
+		clock:    time.Now,
+		cancels:  make(map[string]context.CancelFunc),
+		intents:  make(map[string]Status),
+		deleting: make(map[string]deleteReq),
+		live:     make(map[string]*segProgress),
+		rates:    make(map[string]*rateState),
 	}
 	m.cond = sync.NewCond(&m.mu)
 	e.observer = m
@@ -303,6 +306,64 @@ func (m *Manager) Pause(ctx context.Context, id string) error {
 // failure: it is an operator action, not a transfer error.
 func (m *Manager) Cancel(ctx context.Context, id string) error {
 	return m.stop(ctx, id, StatusCanceled)
+}
+
+// deleteReq is a pending delete handed to an active job's worker: the worker
+// removes the record on its settle path (so no late checkpoint or status write
+// can recreate it) and closes done to release the Delete caller.
+type deleteReq struct {
+	dest string
+	done chan struct{}
+}
+
+// Delete removes a download from the store entirely and discards its partial
+// (.part) file. Unlike Cancel, nothing is kept for a later Resume — the record
+// disappears from List. A completed download's final file is left untouched
+// (only the .part, which no longer exists, is removed). Deleting an unknown id
+// returns ErrNotFound.
+//
+// For an idle download Delete removes the record directly. For one a worker is
+// actively transferring, removing the record here would race the worker's own
+// store writes (a checkpoint or the settle-time status override could recreate
+// it). So Delete instead aborts the transfer and hands the removal to the
+// worker's settle path, which runs after all of that job's writes are done, then
+// waits for it to finish. Either way the record and its .part are gone on return.
+func (m *Manager) Delete(ctx context.Context, id string) error {
+	d, err := m.store.LoadDownload(ctx, id)
+	if err != nil {
+		return fmt.Errorf("engine: manager delete %q: %w", id, err)
+	}
+
+	m.mu.Lock()
+	cancel := m.cancels[id]
+	var done chan struct{}
+	if cancel != nil {
+		done = make(chan struct{})
+		m.deleting[id] = deleteReq{dest: d.Destination, done: done}
+	}
+	m.mu.Unlock()
+
+	if cancel == nil {
+		return m.removeRecord(ctx, id, d.Destination) // idle: safe to remove now
+	}
+
+	cancel() // abort the transfer; the worker's finishJob removes the record
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// removeRecord deletes the store record and discards its .part file. The final
+// file of a completed download is never touched (its .part no longer exists).
+func (m *Manager) removeRecord(ctx context.Context, id, dest string) error {
+	if err := m.store.DeleteDownload(ctx, id); err != nil {
+		return fmt.Errorf("engine: manager delete %q: %w", id, err)
+	}
+	_ = os.Remove(dest + partSuffix)
+	return nil
 }
 
 // stop records the operator's intent (paused/canceled), cancels the in-flight
@@ -578,7 +639,23 @@ func (m *Manager) finishJob(id string, runErr error, startIntent Status, shuttin
 	}
 	delete(m.intents, id)
 	delete(m.cancels, id)
+	del, deleting := m.deleting[id]
+	delete(m.deleting, id)
 	m.mu.Unlock()
+
+	if deleting {
+		// A Delete is waiting on this job. Now that the run has fully returned (so no
+		// further checkpoint or status write will land), remove the record and its
+		// .part, then release the caller. Use a detached, bounded context so the
+		// removal still lands even if the base context is aborting (shutdown).
+		ctx, stop := context.WithTimeout(context.WithoutCancel(m.baseCtx), 5*time.Second)
+		if err := m.removeRecord(ctx, id, del.dest); err != nil {
+			m.logger.Error("engine: manager could not delete record on settle", "download_id", id, "err", err)
+		}
+		stop()
+		close(del.done)
+		return
+	}
 
 	m.classify(id, runErr, intent, shuttingDown)
 }
