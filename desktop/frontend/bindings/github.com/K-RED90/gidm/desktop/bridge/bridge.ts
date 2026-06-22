@@ -27,6 +27,14 @@ export function Add(url: string, dir: string, filename: string, segments: number
 }
 
 /**
+ * GetConfig returns the daemon's current runtime settings (download dir, default
+ * segments/priority, and the global + per-download speed caps).
+ */
+export function GetConfig(): $CancellablePromise<api$0.ConfigView> {
+    return $Call.ByID(2034797030);
+}
+
+/**
  * Health reports whether gidmd answers a ping. Any transport error or a
  * non-pong response reads as "not running".
  */
@@ -81,10 +89,29 @@ export function RevealInFolder(path: string): $CancellablePromise<void> {
 }
 
 /**
+ * SetConfig changes the daemon's runtime settings from the Settings form. The
+ * desktop sends the fully-populated form (it pre-fills from GetConfig), so every
+ * field is set; rates are bytes/sec with 0 = unlimited. It returns the now-current
+ * settings so the UI reflects any normalization the daemon applied.
+ */
+export function SetConfig(downloadDir: string, segments: number, priority: api$0.Priority, maxRate: number, perDownloadMaxRate: number): $CancellablePromise<api$0.ConfigView> {
+    return $Call.ByID(2856010546, downloadDir, segments, priority, maxRate, perDownloadMaxRate);
+}
+
+/**
  * SetPriority changes a download's scheduling priority (low/normal/high).
  */
 export function SetPriority(id: string, priority: api$0.Priority): $CancellablePromise<void> {
     return $Call.ByID(1176805276, id, priority);
+}
+
+/**
+ * SetRate caps a single download to bps bytes/sec; 0 removes the per-download cap
+ * (the download then inherits the daemon default). Applied live by the daemon if
+ * the download is running.
+ */
+export function SetRate(id: string, bps: number): $CancellablePromise<void> {
+    return $Call.ByID(1895515046, id, bps);
 }
 
 /**

@@ -41,6 +41,7 @@ func toView(d *engine.Download, full bool) api.DownloadView {
 		Destination:  d.Destination,
 		Checksum:     d.Checksum,
 		SegmentCount: d.SegmentCount,
+		MaxRate:      d.MaxRate,
 		CreatedAt:    formatTime(d.CreatedAt),
 		UpdatedAt:    formatTime(d.UpdatedAt),
 	}
@@ -48,6 +49,41 @@ func toView(d *engine.Download, full bool) api.DownloadView {
 		v.Segments = segmentsToView(d.Segments)
 	}
 	return v
+}
+
+// toConfigView projects the engine's runtime Settings onto the api.ConfigView
+// wire shape (the get-config result and the set-config echo).
+func toConfigView(s engine.Settings) api.ConfigView {
+	return api.ConfigView{
+		DownloadDir:         s.DownloadDir,
+		SegmentsPerDownload: s.SegmentsPerDownload,
+		DefaultPriority:     priorityToView(s.DefaultPriority),
+		MaxRate:             s.MaxRate,
+		PerDownloadMaxRate:  s.PerDownloadMaxRate,
+	}
+}
+
+// applyConfigPatch overlays a set-config request's present (non-nil) fields onto
+// the current settings, leaving the rest unchanged. The result is the full
+// settings to apply and persist — the merge that gives set-config its patch
+// semantics.
+func applyConfigPatch(cur engine.Settings, sc api.SetConfig) engine.Settings {
+	if sc.DownloadDir != nil {
+		cur.DownloadDir = *sc.DownloadDir
+	}
+	if sc.SegmentsPerDownload != nil {
+		cur.SegmentsPerDownload = *sc.SegmentsPerDownload
+	}
+	if sc.DefaultPriority != nil {
+		cur.DefaultPriority = priorityFromView(*sc.DefaultPriority, cur.DefaultPriority)
+	}
+	if sc.MaxRate != nil {
+		cur.MaxRate = *sc.MaxRate
+	}
+	if sc.PerDownloadMaxRate != nil {
+		cur.PerDownloadMaxRate = *sc.PerDownloadMaxRate
+	}
+	return cur
 }
 
 // segmentsToView projects the engine's per-segment progress onto the wire shape.

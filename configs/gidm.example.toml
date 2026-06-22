@@ -4,6 +4,12 @@
 # Every value is optional and overridable by env (GIDM_SECTION_KEY) or flags.
 # Precedence (low -> high): defaults < this file < environment < flags.
 # Empty path values fall back to OS-appropriate defaults.
+#
+# A subset is also live-settable at runtime via `gidm config set` or the desktop
+# Settings panel: download.max_rate, download.per_download_max_rate,
+# download.segments_per_download, download.default_priority, paths.download_dir.
+# A value changed that way is persisted in the store and overrides this file on the
+# next daemon start (it is the highest-priority layer for those keys).
 
 [download]
 max_concurrent        = 4       # downloads transferring at once

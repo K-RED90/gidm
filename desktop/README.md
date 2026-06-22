@@ -62,5 +62,8 @@ is a local dev convenience and is gitignored.
 - The window UI needs a desktop session to run; `wails3 dev`/`build` won't render
   in a headless environment.
 - Native notifications on macOS only display from a packaged, authorized build.
-- File-type sidebar categories, a settings panel, and the Chrome extension (M4)
-  are future work the structure already leaves room for.
+- A toolbar Settings panel edits the daemon's runtime config (download folder,
+  default connections/priority, and the global + per-download speed caps) over the
+  `get-config`/`set-config` protocol; the right-click "Limit speed" submenu caps a
+  single download live (`set-rate`). Changes persist in the store and survive a
+  restart. The Chrome extension (M4) is the remaining future work.

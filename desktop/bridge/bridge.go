@@ -92,6 +92,48 @@ func (b *Bridge) SetPriority(id string, priority api.Priority) error {
 	return b.ack(api.NewSetPriorityRequest(id, priority))
 }
 
+// SetRate caps a single download to bps bytes/sec; 0 removes the per-download cap
+// (the download then inherits the daemon default). Applied live by the daemon if
+// the download is running.
+func (b *Bridge) SetRate(id string, bps int) error {
+	return b.ack(api.NewSetRateRequest(id, bps))
+}
+
+// GetConfig returns the daemon's current runtime settings (download dir, default
+// segments/priority, and the global + per-download speed caps).
+func (b *Bridge) GetConfig() (api.ConfigView, error) {
+	resp, err := b.client.Do(context.Background(), api.NewGetConfigRequest())
+	if err != nil {
+		return api.ConfigView{}, err
+	}
+	if !resp.OK || resp.Config == nil {
+		return api.ConfigView{}, respErr(resp)
+	}
+	return resp.Config.Config, nil
+}
+
+// SetConfig changes the daemon's runtime settings from the Settings form. The
+// desktop sends the fully-populated form (it pre-fills from GetConfig), so every
+// field is set; rates are bytes/sec with 0 = unlimited. It returns the now-current
+// settings so the UI reflects any normalization the daemon applied.
+func (b *Bridge) SetConfig(downloadDir string, segments int, priority api.Priority, maxRate, perDownloadMaxRate int) (api.ConfigView, error) {
+	sc := api.SetConfig{
+		DownloadDir:         &downloadDir,
+		SegmentsPerDownload: &segments,
+		DefaultPriority:     &priority,
+		MaxRate:             &maxRate,
+		PerDownloadMaxRate:  &perDownloadMaxRate,
+	}
+	resp, err := b.client.Do(context.Background(), api.NewSetConfigRequest(sc))
+	if err != nil {
+		return api.ConfigView{}, err
+	}
+	if !resp.OK || resp.Config == nil {
+		return api.ConfigView{}, respErr(resp)
+	}
+	return resp.Config.Config, nil
+}
+
 // OpenFile opens a downloaded file with the OS default application. The path is
 // the download's destination (the frontend already has it), so no daemon lookup
 // is needed.

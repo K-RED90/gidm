@@ -29,7 +29,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		if err := api.ValidateAdd(*req.Add); err != nil {
 			return s.toResponse(err), verb, ""
 		}
-		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.defaultPriority), engine.AddOptions{
+		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.mgr.Settings().DefaultPriority), engine.AddOptions{
 			Dir:      req.Add.Dir,
 			Filename: req.Add.Filename,
 			Segments: req.Add.Segments,
@@ -114,10 +114,42 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 			return s.toResponse(err), verb, ""
 		}
 		id = req.SetPriority.ID
-		if err := s.mgr.SetPriority(ctx, id, priorityFromView(req.SetPriority.Priority, s.defaultPriority)); err != nil {
+		if err := s.mgr.SetPriority(ctx, id, priorityFromView(req.SetPriority.Priority, s.mgr.Settings().DefaultPriority)); err != nil {
 			return s.toResponse(err), verb, id
 		}
 		return api.OKResponse(), verb, id
+
+	case api.OpSetRate:
+		if req.SetRate == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing set_rate payload"), verb, ""
+		}
+		if err := api.ValidateSetRate(*req.SetRate); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		id = req.SetRate.ID
+		if err := s.mgr.SetRate(ctx, id, req.SetRate.MaxRate); err != nil {
+			return s.toResponse(err), verb, id
+		}
+		return api.OKResponse(), verb, id
+
+	case api.OpGetConfig:
+		return api.ConfigResponse(toConfigView(s.mgr.Settings())), verb, ""
+
+	case api.OpSetConfig:
+		if req.SetConfig == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing set_config payload"), verb, ""
+		}
+		if err := api.ValidateSetConfig(*req.SetConfig); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		// Patch the requested fields onto the current settings (nil fields unchanged),
+		// apply+persist, then echo the now-current settings so the client sees the
+		// effective result.
+		merged := applyConfigPatch(s.mgr.Settings(), *req.SetConfig)
+		if err := s.mgr.SetSettings(ctx, merged); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		return api.ConfigResponse(toConfigView(s.mgr.Settings())), verb, ""
 
 	case api.OpPing:
 		// Health/version only — no Manager call. This also answers the
@@ -149,6 +181,8 @@ func (s *Server) toResponse(err error) api.Response {
 		return api.ErrorResponse(api.CodeBadRequest, "dir must be an absolute path and filename a single name")
 	case errors.Is(err, api.ErrInvalidSegments):
 		return api.ErrorResponse(api.CodeBadRequest, "segments must be between 0 and 64")
+	case errors.Is(err, api.ErrInvalidRate):
+		return api.ErrorResponse(api.CodeBadRequest, "rate must be a non-negative number of bytes per second")
 	default:
 		// ErrManagerClosed and any unanticipated failure fall here: log the detail,
 		// return a generic message.

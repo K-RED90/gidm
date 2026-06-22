@@ -224,6 +224,18 @@ class AppStore {
     await this.refresh()
   }
 
+  // setRate caps a single download to bps bytes/sec (0 removes the cap) and
+  // refreshes so the row's limit badge updates at once. The daemon applies it live
+  // if the download is running.
+  async setRate(id: string, bps: number): Promise<void> {
+    try {
+      await Bridge.SetRate(id, bps)
+      await this.refresh()
+    } catch (e) {
+      toaster.error(`Could not set speed limit: ${errMessage(e)}`)
+    }
+  }
+
   // pauseAll / resumeAll are the toolbar's global actions; each fans out over the
   // matching downloads and refreshes once at the end.
   async pauseAll(): Promise<void> {

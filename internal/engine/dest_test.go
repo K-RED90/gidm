@@ -6,9 +6,17 @@ import (
 	"testing"
 )
 
+// engineWithDir builds a bare Engine whose only configured field is the download
+// directory, enough to exercise the destination-resolution helpers.
+func engineWithDir(dir string) *Engine {
+	e := &Engine{}
+	e.downloadDir.Store(&dir)
+	return e
+}
+
 func TestDestPath(t *testing.T) {
 	dir := "/downloads"
-	e := &Engine{downloadDir: dir}
+	e := engineWithDir(dir)
 
 	tests := []struct {
 		name     string
@@ -62,7 +70,7 @@ func TestDestPath(t *testing.T) {
 // A hostile Content-Disposition or URL must never resolve outside downloadDir.
 func TestDestPathContainsTraversal(t *testing.T) {
 	dir := "/downloads"
-	e := &Engine{downloadDir: dir}
+	e := engineWithDir(dir)
 
 	hostile := []ProbeInfo{
 		{Filename: "../../etc/passwd"},

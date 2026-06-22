@@ -25,7 +25,7 @@ func (e *Engine) destPath(probe ProbeInfo, rawURL string) string {
 	if name == "" {
 		name = baseFromURL(rawURL)
 	}
-	return filepath.Join(e.downloadDir, safeBase(name))
+	return filepath.Join(e.dlDir(), safeBase(name))
 }
 
 // plannedDest resolves a caller-supplied destination at submit time, before any
@@ -39,7 +39,7 @@ func (e *Engine) plannedDest(dir, filename, rawURL string) string {
 		return ""
 	}
 	if dir == "" {
-		dir = e.downloadDir
+		dir = e.dlDir()
 	}
 	name := filename
 	if name == "" {
@@ -68,7 +68,7 @@ func (e *Engine) segmentsFor(dl *Download) int {
 	if dl.SegmentCount > 0 {
 		return dl.SegmentCount
 	}
-	return e.cfg.SegmentsPerDownload
+	return e.defaultSegmentCount()
 }
 
 // safeBase collapses an arbitrary name to a single, separator-free filename that

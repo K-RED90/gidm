@@ -34,10 +34,21 @@ type fakeManager struct {
 	resumeErr      error
 	deleteErr      error
 	setPriorityErr error
+	setRateErr     error
+	setSettingsErr error
+
+	// settings is what Settings() returns and SetSettings() stores; the zero value
+	// has DefaultPriority == PriorityNormal, matching the old New default.
+	settings engine.Settings
 
 	// lastAddOpts records the options of the most recent Submit so a handler test
-	// can assert the add op forwards Dir/Filename/Segments unchanged.
+	// can assert the add op forwards Dir/Filename/Segments unchanged. lastSetRate
+	// records the most recent SetRate likewise.
 	lastAddOpts engine.AddOptions
+	lastSetRate struct {
+		id  string
+		bps int
+	}
 }
 
 func newFakeManager() *fakeManager {
@@ -135,6 +146,37 @@ func (f *fakeManager) SetPriority(_ context.Context, id string, p engine.Priorit
 	return nil
 }
 
+func (f *fakeManager) SetRate(_ context.Context, id string, bps int) error {
+	if f.setRateErr != nil {
+		return f.setRateErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.downloads[id]
+	if !ok {
+		return engine.ErrNotFound
+	}
+	d.MaxRate = bps
+	f.lastSetRate.id, f.lastSetRate.bps = id, bps
+	return nil
+}
+
+func (f *fakeManager) Settings() engine.Settings {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.settings
+}
+
+func (f *fakeManager) SetSettings(_ context.Context, s engine.Settings) error {
+	if f.setSettingsErr != nil {
+		return f.setSettingsErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings = s
+	return nil
+}
+
 // startServer spins up a real Server on a socket in t.TempDir and returns the
 // socket path. It blocks until the listener is bound so tests never race the
 // Accept loop.
@@ -142,7 +184,7 @@ func startServer(t *testing.T, mgr apiserver.Manager) (*apiserver.Server, string
 	t.Helper()
 	sock := tempSocketPath(t)
 	cfg := config.Daemon{SocketPath: sock} // zero timeouts: New must floor them
-	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), cfg)
 
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
@@ -376,8 +418,9 @@ func TestAddForwardsOptions(t *testing.T) {
 // the default is config-driven, not hardcoded to normal.
 func TestServerAppliesConfiguredDefaultPriority(t *testing.T) {
 	mgr := newFakeManager()
+	mgr.settings.DefaultPriority = engine.PriorityHigh // the daemon's runtime default
 	sock := tempSocketPath(t)
-	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityHigh)
+	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListeningOrServeErr(t, sock, served)
@@ -447,7 +490,7 @@ func TestOversizedRequestRejected(t *testing.T) {
 	mgr := newFakeManager()
 	sock := tempSocketPath(t)
 	cfg := config.Daemon{SocketPath: sock, MaxRequestBytes: 64} // tiny cap
-	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), cfg)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)

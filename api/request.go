@@ -17,7 +17,10 @@ const (
 	OpResume      Op = "resume"
 	OpRm          Op = "rm"
 	OpSetPriority Op = "set-priority"
-	OpPing        Op = "ping" // health check
+	OpSetRate     Op = "set-rate"   // per-download bandwidth cap
+	OpGetConfig   Op = "get-config" // read daemon runtime settings
+	OpSetConfig   Op = "set-config" // change daemon runtime settings
+	OpPing        Op = "ping"       // health check
 )
 
 // Request is the envelope-with-op wire request. Op selects the verb; the
@@ -34,6 +37,8 @@ type Request struct {
 	Resume      *Resume      `json:"resume,omitempty"`
 	Rm          *Rm          `json:"rm,omitempty"`
 	SetPriority *SetPriority `json:"set_priority,omitempty"`
+	SetRate     *SetRate     `json:"set_rate,omitempty"`
+	SetConfig   *SetConfig   `json:"set_config,omitempty"`
 }
 
 type Add struct {
@@ -71,6 +76,24 @@ type Rm struct {
 type SetPriority struct {
 	ID       string   `json:"id"`
 	Priority Priority `json:"priority"`
+}
+
+// SetRate sets one download's bandwidth cap in bytes/sec. Zero removes the
+// per-download cap, so the download inherits the daemon's default.
+type SetRate struct {
+	ID      string `json:"id"`
+	MaxRate int    `json:"max_rate"`
+}
+
+// SetConfig is a partial update of the daemon's runtime settings: a nil field is
+// left unchanged. Rates are bytes/sec with 0 = unlimited, so 0 is a real value —
+// which is why the fields are pointers rather than using the zero value as "unset".
+type SetConfig struct {
+	DownloadDir         *string   `json:"download_dir,omitempty"`
+	SegmentsPerDownload *int      `json:"segments_per_download,omitempty"`
+	DefaultPriority     *Priority `json:"default_priority,omitempty"`
+	MaxRate             *int      `json:"max_rate,omitempty"`
+	PerDownloadMaxRate  *int      `json:"per_download_max_rate,omitempty"`
 }
 
 // NewAddRequest builds a well-formed add request at normal priority, stamping
@@ -114,6 +137,18 @@ func NewRmRequest(id string) Request {
 
 func NewSetPriorityRequest(id string, p Priority) Request {
 	return Request{Version: Version, Op: OpSetPriority, SetPriority: &SetPriority{ID: id, Priority: p}}
+}
+
+func NewSetRateRequest(id string, maxRate int) Request {
+	return Request{Version: Version, Op: OpSetRate, SetRate: &SetRate{ID: id, MaxRate: maxRate}}
+}
+
+func NewGetConfigRequest() Request {
+	return Request{Version: Version, Op: OpGetConfig}
+}
+
+func NewSetConfigRequest(sc SetConfig) Request {
+	return Request{Version: Version, Op: OpSetConfig, SetConfig: &sc}
 }
 
 func NewPingRequest() Request {

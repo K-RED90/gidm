@@ -271,6 +271,38 @@ func TestSegmentCountRoundTrip(t *testing.T) {
 	}
 }
 
+// TestMaxRateRoundTrip asserts a per-download bandwidth cap survives a save/load
+// and a re-save (the upsert UPDATE path).
+func TestMaxRateRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	d := sampleDownload("rate")
+	d.MaxRate = 1 << 20 // 1 MiB/s
+	if err := s.SaveDownload(ctx, d); err != nil {
+		t.Fatalf("SaveDownload: %v", err)
+	}
+	got, err := s.LoadDownload(ctx, "rate")
+	if err != nil {
+		t.Fatalf("LoadDownload: %v", err)
+	}
+	if got.MaxRate != 1<<20 {
+		t.Errorf("Load MaxRate = %d, want %d", got.MaxRate, 1<<20)
+	}
+
+	d.MaxRate = 0 // remove the cap
+	if err := s.SaveDownload(ctx, d); err != nil {
+		t.Fatalf("SaveDownload (update): %v", err)
+	}
+	if got, err = s.LoadDownload(ctx, "rate"); err != nil {
+		t.Fatalf("LoadDownload (after update): %v", err)
+	}
+	if got.MaxRate != 0 {
+		t.Errorf("updated MaxRate = %d, want 0", got.MaxRate)
+	}
+}
+
 // TestMigrationBackfillsSegmentCountForLegacyDB writes a database with the
 // pre-segment_count schema and asserts New's additive migration adds the column,
 // defaulting existing rows to 0 (meaning "use the configured default").
@@ -309,5 +341,9 @@ func TestMigrationBackfillsSegmentCountForLegacyDB(t *testing.T) {
 	}
 	if got.SegmentCount != 0 {
 		t.Errorf("legacy row SegmentCount = %d, want 0 (default)", got.SegmentCount)
+	}
+	// The same additive migration backfills max_rate; a legacy row is uncapped.
+	if got.MaxRate != 0 {
+		t.Errorf("legacy row MaxRate = %d, want 0 (default)", got.MaxRate)
 	}
 }

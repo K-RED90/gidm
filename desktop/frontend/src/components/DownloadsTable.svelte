@@ -4,10 +4,10 @@
   import { Bridge, DownloadStatus, Priority, copyText, openPath, revealPath, type DownloadView } from '../lib/bridge'
   import { store } from '../lib/store.svelte'
   import { menu, type MenuItem } from '../lib/menu.svelte'
-  import { priorityMenuItems } from '../lib/actions'
+  import { priorityMenuItems, rateMenuItems } from '../lib/actions'
   import { toaster, errMessage } from '../lib/toast.svelte'
   import { PAUSABLE, RESUMABLE, STATUS_LABEL } from '../lib/status'
-  import { categoryOf, fileName, humanEta, humanSize, humanSpeed, percent, type FileCategory } from '../lib/format'
+  import { capLabel, categoryOf, fileName, humanEta, humanSize, humanSpeed, percent, type FileCategory } from '../lib/format'
 
   // onDetails opens the Properties dialog (owned by App) for a single download.
   let { onDetails }: { onDetails: (id: string) => void } = $props()
@@ -128,6 +128,7 @@
       { kind: 'submenu', label: 'Set Priority', icon: 'sliders', items: priorityMenuItems() },
     ]
     if (n === 1) {
+      items.push({ kind: 'submenu', label: 'Limit speed', icon: 'gauge', items: rateMenuItems(d) })
       items.push({ kind: 'sep' })
       if (d.status === DownloadStatus.StatusCompleted) {
         items.push({ kind: 'item', label: 'Open file', icon: 'externalLink', run: () => void doOpen(d.destination) })
@@ -285,6 +286,9 @@
               <div class="name">
                 <span class="ficon"><Icon name={TYPE_ICON[categoryOf(d)]} size={16} /></span>
                 <span class="fname">{fileName(d)}</span>
+                {#if (d.max_rate ?? 0) > 0}
+                  <span class="caplimit" title="Speed limit">{capLabel(d.max_rate ?? 0)}</span>
+                {/if}
               </div>
             </td>
             <td class="col-size num">{d.total_size > 0 ? humanSize(d.total_size) : '—'}</td>
@@ -494,6 +498,22 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Per-download speed-cap badge: a quiet pill next to the name. */
+  .caplimit {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+    color: var(--muted);
+    background: var(--surface-2);
   }
 
   .num {

@@ -13,7 +13,6 @@ import (
 	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/apiserver"
 	"github.com/K-RED90/gidm/internal/config"
-	"github.com/K-RED90/gidm/internal/engine"
 )
 
 func testLogger() *slog.Logger {
@@ -73,7 +72,7 @@ func TestStaleSocketCleanup(t *testing.T) {
 	}
 
 	mgr := newFakeManager()
-	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -91,7 +90,7 @@ func TestSingleInstanceRefused(t *testing.T) {
 	mgr := newFakeManager()
 	_, sock := startServer(t, mgr)
 
-	second := apiserver.New(newFakeManager(), testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	second := apiserver.New(newFakeManager(), testLogger(), config.Daemon{SocketPath: sock})
 	err := second.Serve(context.Background())
 	if err == nil || err.Error() != apiserver.ErrAlreadyRunning.Error() {
 		t.Fatalf("second Serve err = %v, want ErrAlreadyRunning", err)
@@ -115,7 +114,7 @@ func TestGracefulShutdownNoLeaks(t *testing.T) {
 
 	mgr := newFakeManager()
 	sock := tempSocketPath(t)
-	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -168,7 +167,7 @@ func TestShutdownTimeoutForceClosesConnections(t *testing.T) {
 		SocketPath:      sock,
 		ShutdownTimeout: config.Duration(50 * time.Millisecond),
 	}
-	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), cfg)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)

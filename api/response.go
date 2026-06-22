@@ -35,6 +35,7 @@ type Response struct {
 	List   *ListResult   `json:"list,omitempty"`
 	Status *StatusResult `json:"status,omitempty"`
 	Ping   *PingResult   `json:"ping,omitempty"`
+	Config *ConfigResult `json:"config,omitempty"`
 }
 
 // OKResponse is a bare success acknowledgement (used by pause, resume, rm).
@@ -66,4 +67,10 @@ func StatusResponse(d DownloadView) Response {
 
 func PingResponse() Response {
 	return Response{Version: Version, OK: true, Ping: &PingResult{Version: Version}}
+}
+
+// ConfigResponse carries the daemon's current runtime settings (get-config and
+// the echo returned by set-config).
+func ConfigResponse(c ConfigView) Response {
+	return Response{Version: Version, OK: true, Config: &ConfigResult{Config: c}}
 }
