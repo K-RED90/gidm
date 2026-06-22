@@ -19,7 +19,7 @@ func TestRedirectCapExceeded(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond), WithMaxRedirects(3))
-	_, err := c.Probe(context.Background(), srv.URL)
+	_, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if !errors.Is(err, ErrTooManyRedirects) {
 		t.Fatalf("err = %v, want ErrTooManyRedirects", err)
 	}
@@ -36,7 +36,7 @@ func TestRedirectDowngradeRejected(t *testing.T) {
 	defer secure.Close()
 
 	c := newServerClient(t, config.Network{TLSSkipVerify: true}, testDownload(0, time.Millisecond))
-	_, err := c.Probe(context.Background(), secure.URL)
+	_, err := c.Probe(context.Background(), secure.URL, RequestOptions{})
 	if !errors.Is(err, ErrInsecureRedirect) {
 		t.Fatalf("err = %v, want ErrInsecureRedirect", err)
 	}
@@ -49,7 +49,7 @@ func TestRedirectNonHTTPSchemeRejected(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	_, err := c.Probe(context.Background(), srv.URL)
+	_, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if !errors.Is(err, ErrInsecureRedirect) {
 		t.Fatalf("err = %v, want ErrInsecureRedirect", err)
 	}
@@ -67,7 +67,7 @@ func TestRedirectUpgradeAllowed(t *testing.T) {
 	defer plain.Close()
 
 	c := newServerClient(t, config.Network{TLSSkipVerify: true}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), plain.URL)
+	res, err := c.Probe(context.Background(), plain.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}

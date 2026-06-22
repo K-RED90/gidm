@@ -20,6 +20,7 @@ const (
 	OpSetRate     Op = "set-rate"   // per-download bandwidth cap
 	OpGetConfig   Op = "get-config" // read daemon runtime settings
 	OpSetConfig   Op = "set-config" // change daemon runtime settings
+	OpSetAuth     Op = "set-auth"   // attach/replace per-download credentials
 	OpPing        Op = "ping"       // health check
 )
 
@@ -39,6 +40,28 @@ type Request struct {
 	SetPriority *SetPriority `json:"set_priority,omitempty"`
 	SetRate     *SetRate     `json:"set_rate,omitempty"`
 	SetConfig   *SetConfig   `json:"set_config,omitempty"`
+	SetAuth     *SetAuth     `json:"set_auth,omitempty"`
+}
+
+// Credentials is the optional per-download request authentication IDM exposes in
+// its File Properties dialog: HTTP Basic auth (Username/Password), a Referer, an
+// explicit Cookie, and arbitrary extra request headers (e.g. a bearer token).
+// Every field is optional; the zero value adds no auth. The password travels to
+// the daemon over the local socket but is never returned to a client — the
+// read-side AuthView reports only whether one is set.
+type Credentials struct {
+	Username string            `json:"username,omitempty"`
+	Password string            `json:"password,omitempty"`
+	Referer  string            `json:"referer,omitempty"`
+	Cookie   string            `json:"cookie,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
+}
+
+// IsZero reports whether no credential field is set, so callers can treat an
+// all-empty Credentials as "no auth" rather than persisting an empty record.
+func (c Credentials) IsZero() bool {
+	return c.Username == "" && c.Password == "" && c.Referer == "" &&
+		c.Cookie == "" && len(c.Headers) == 0
 }
 
 type Add struct {
@@ -55,6 +78,11 @@ type Add struct {
 	Dir      string `json:"dir,omitempty"`      // destination directory (absolute)
 	Filename string `json:"filename,omitempty"` // single path element, no separators
 	Segments int    `json:"segments,omitempty"` // per-download segment count
+
+	// Auth optionally attaches request authentication (Basic auth, Referer,
+	// Cookie, custom headers). nil ⇒ no auth, so an older client and the bare-URL
+	// form are unchanged.
+	Auth *Credentials `json:"auth,omitempty"`
 }
 
 type Status struct {
@@ -94,6 +122,18 @@ type SetConfig struct {
 	DefaultPriority     *Priority `json:"default_priority,omitempty"`
 	MaxRate             *int      `json:"max_rate,omitempty"`
 	PerDownloadMaxRate  *int      `json:"per_download_max_rate,omitempty"`
+}
+
+// SetAuth replaces a download's stored credentials so a failed (e.g. 401) or
+// hotlink-blocked download can be fixed and resumed without re-adding it. Auth
+// carries the new Username/Referer/Cookie/Headers. Because the password is never
+// returned to a client, KeepPassword lets the editor say "leave the stored
+// password as it is" (it then ignores Auth.Password); KeepPassword=false replaces
+// the password with Auth.Password, where "" clears it.
+type SetAuth struct {
+	ID           string      `json:"id"`
+	Auth         Credentials `json:"auth"`
+	KeepPassword bool        `json:"keep_password,omitempty"`
 }
 
 // NewAddRequest builds a well-formed add request at normal priority, stamping
@@ -149,6 +189,12 @@ func NewGetConfigRequest() Request {
 
 func NewSetConfigRequest(sc SetConfig) Request {
 	return Request{Version: Version, Op: OpSetConfig, SetConfig: &sc}
+}
+
+// NewSetAuthRequest builds a set-auth request. keepPassword=true keeps the
+// download's stored password and applies only auth's other fields.
+func NewSetAuthRequest(id string, auth Credentials, keepPassword bool) Request {
+	return Request{Version: Version, Op: OpSetAuth, SetAuth: &SetAuth{ID: id, Auth: auth, KeepPassword: keepPassword}}
 }
 
 func NewPingRequest() Request {

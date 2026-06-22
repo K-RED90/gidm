@@ -24,7 +24,7 @@ const partSuffix = ".part"
 // place. It resumes a matching persisted download whose validators still match,
 // after reconciling the persisted progress against the actual .part file.
 func (e *Engine) Download(ctx context.Context, url string) (*Download, error) {
-	probe, err := e.fetcher.Probe(ctx, url)
+	probe, err := e.fetcher.Probe(ctx, url, RequestOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("engine: probe %q: %w", url, err)
 	}
@@ -58,7 +58,7 @@ func (e *Engine) Download(ctx context.Context, url string) (*Download, error) {
 // is authoritative — so two callers must not Run records targeting the same
 // destination concurrently (Manager serializes that via its worker pool).
 func (e *Engine) Run(ctx context.Context, dl *Download) (*Download, error) {
-	probe, err := e.fetcher.Probe(ctx, dl.URL)
+	probe, err := e.fetcher.Probe(ctx, dl.URL, requestOptions(dl))
 	if err != nil {
 		return nil, fmt.Errorf("engine: probe %q: %w", dl.URL, err)
 	}

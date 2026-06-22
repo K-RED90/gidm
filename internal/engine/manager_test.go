@@ -137,20 +137,20 @@ type gatedFetcher struct {
 	rangeReqs [][2]int64
 }
 
-func (f *gatedFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
+func (f *gatedFetcher) Probe(_ context.Context, url string, _ RequestOptions) (ProbeInfo, error) {
 	// Derive a distinct filename from the URL path so concurrent downloads do not
 	// collide on one destination; the suite submits unique URLs per download.
 	return ProbeInfo{FinalURL: url, Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: baseFromURL(url)}, nil
 }
 
-func (f *gatedFetcher) RangeGet(ctx context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *gatedFetcher) RangeGet(ctx context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	f.mu.Lock()
 	f.rangeReqs = append(f.rangeReqs, [2]int64{start, end})
 	f.mu.Unlock()
 	return f.body(ctx, f.content[start:end+1]), nil
 }
 
-func (f *gatedFetcher) Get(ctx context.Context, _ string) (io.ReadCloser, error) {
+func (f *gatedFetcher) Get(ctx context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	return f.body(ctx, f.content), nil
 }
 
@@ -878,16 +878,16 @@ func (f *priorityFetcher) dispatchOrder() []string {
 	return append([]string(nil), f.order...)
 }
 
-func (f *priorityFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
+func (f *priorityFetcher) Probe(_ context.Context, url string, _ RequestOptions) (ProbeInfo, error) {
 	f.record(url)
 	return ProbeInfo{FinalURL: url, Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: baseFromURL(url)}, nil
 }
 
-func (f *priorityFetcher) RangeGet(ctx context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *priorityFetcher) RangeGet(ctx context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	return f.body(ctx, f.content[start:end+1])
 }
 
-func (f *priorityFetcher) Get(ctx context.Context, _ string) (io.ReadCloser, error) {
+func (f *priorityFetcher) Get(ctx context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	return f.body(ctx, f.content)
 }
 

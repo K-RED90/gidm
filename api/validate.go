@@ -18,7 +18,34 @@ var (
 	ErrInvalidDestination = errors.New("dir must be an absolute path and filename a single name")
 	ErrInvalidSegments    = errors.New("segments must be between 0 and 64")
 	ErrInvalidRate        = errors.New("rate must be a non-negative number of bytes per second")
+	ErrInvalidCredentials = errors.New("credentials contain an invalid header or control character")
 )
+
+// Credential bounds. These cap an absurd or hostile auth payload at the wire
+// boundary; they are generous enough never to reject a real bearer token or
+// cookie. Header names and values, and every text field, are additionally
+// rejected for CR/LF to foreclose header injection (a value smuggling its own
+// header line into the request).
+const (
+	maxHeaderCount    = 32
+	maxHeaderKeyLen   = 256
+	maxHeaderValueLen = 8192
+	maxCredFieldLen   = 8192
+)
+
+// restrictedHeaders are headers the engine sets itself (or that govern message
+// framing/routing); a caller may not override them via custom headers. Basic
+// auth flows through Username/Password and an explicit cookie through Cookie, so
+// Authorization and Cookie are reserved here to avoid two sources of truth.
+var restrictedHeaders = map[string]struct{}{
+	"host":              {},
+	"content-length":    {},
+	"connection":        {},
+	"transfer-encoding": {},
+	"range":             {},
+	"authorization":     {},
+	"cookie":            {},
+}
 
 // maxAddSegments is a coarse upper bound on a per-download segment override at
 // the wire boundary; the daemon clamps further to its configured MaxSegments.
@@ -48,7 +75,70 @@ func ValidateAdd(a Add) error {
 	if a.Segments < 0 || a.Segments > maxAddSegments {
 		return fmt.Errorf("api: validate add segments %d: %w", a.Segments, ErrInvalidSegments)
 	}
+	if a.Auth != nil {
+		if err := ValidateCredentials(*a.Auth); err != nil {
+			return err
+		}
+	}
 	return ValidatePriority(a.Priority)
+}
+
+// ValidateCredentials rejects an auth payload that is oversized or could inject a
+// header: CR/LF in any field, an ill-formed or reserved header name, and counts
+// or lengths past the bounds above. It is the wire-boundary check; httpx also
+// only ever sets these through net/http, which canonicalizes names.
+func ValidateCredentials(c Credentials) error {
+	for _, f := range []struct{ name, val string }{
+		{"username", c.Username}, {"password", c.Password},
+		{"referer", c.Referer}, {"cookie", c.Cookie},
+	} {
+		if len(f.val) > maxCredFieldLen || strings.ContainsAny(f.val, "\r\n") {
+			return fmt.Errorf("api: validate credentials %s: %w", f.name, ErrInvalidCredentials)
+		}
+	}
+	if len(c.Headers) > maxHeaderCount {
+		return fmt.Errorf("api: validate credentials: %d headers exceeds %d: %w", len(c.Headers), maxHeaderCount, ErrInvalidCredentials)
+	}
+	for k, v := range c.Headers {
+		if k == "" || len(k) > maxHeaderKeyLen || len(v) > maxHeaderValueLen {
+			return fmt.Errorf("api: validate credentials header %q: %w", k, ErrInvalidCredentials)
+		}
+		if !validHeaderName(k) || strings.ContainsAny(v, "\r\n") {
+			return fmt.Errorf("api: validate credentials header %q: %w", k, ErrInvalidCredentials)
+		}
+		if _, reserved := restrictedHeaders[strings.ToLower(k)]; reserved {
+			return fmt.Errorf("api: validate credentials header %q is reserved: %w", k, ErrInvalidCredentials)
+		}
+	}
+	return nil
+}
+
+// validHeaderName reports whether s is a valid RFC 7230 header field-name token
+// (visible ASCII, no separators or control characters), so a malformed name can
+// never reach net/http.
+func validHeaderName(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isTokenChar(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTokenChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
+}
+
+// ValidateSetAuth requires a non-empty ID and valid credentials.
+func ValidateSetAuth(sa SetAuth) error {
+	if err := ValidateID(sa.ID); err != nil {
+		return err
+	}
+	return ValidateCredentials(sa.Auth)
 }
 
 // validateDestination rejects a destination override that could escape the

@@ -25,7 +25,7 @@ func TestProbeWithRangeSupport(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), srv.URL)
+	res, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestProbeWithoutRangeSupport(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), srv.URL)
+	res, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestProbeAcceptRangesOn200(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), srv.URL)
+	res, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestProbeUnknownTotalSize(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), srv.URL)
+	res, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestProbeSanitizesContentDispositionFilename(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), srv.URL)
+	res, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestProbeDecodesAndSanitizesExtendedFilename(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	res, err := c.Probe(context.Background(), srv.URL)
+	res, err := c.Probe(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestProbeErrorsOnBadStatus(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	if _, err := c.Probe(context.Background(), srv.URL); err == nil {
+	if _, err := c.Probe(context.Background(), srv.URL, RequestOptions{}); err == nil {
 		t.Fatal("Probe: expected error on 403, got nil")
 	}
 }

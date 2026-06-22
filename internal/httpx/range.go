@@ -13,12 +13,13 @@ import (
 // range and is rejected, since a full body would corrupt a segmented write. The
 // returned response streams the body, which the caller must close; the body is
 // not read here.
-func (c *Client) RangeGet(ctx context.Context, rawURL string, start, end int64) (*http.Response, error) {
+func (c *Client) RangeGet(ctx context.Context, rawURL string, start, end int64, opts RequestOptions) (*http.Response, error) {
 	if start < 0 || end < start {
 		return nil, fmt.Errorf("httpx: invalid range [%d, %d]", start, end)
 	}
 	spec := fmt.Sprintf("bytes=%d-%d", start, end)
 	resp, err := c.do(ctx, http.MethodGet, rawURL, func(req *http.Request) {
+		opts.apply(req)
 		req.Header.Set("Range", spec)
 	})
 	if err != nil {

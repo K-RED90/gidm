@@ -195,9 +195,10 @@ func (m *Manager) recover(ctx context.Context) error {
 // The zero value (all fields empty/zero) reproduces the bare-URL add: the engine
 // derives the destination from the probe and uses the configured segment count.
 type AddOptions struct {
-	Dir      string // destination directory; "" → configured download dir
-	Filename string // output filename; "" → server-suggested or URL-derived
-	Segments int    // per-download segment count; 0 → configured default
+	Dir      string          // destination directory; "" → configured download dir
+	Filename string          // output filename; "" → server-suggested or URL-derived
+	Segments int             // per-download segment count; 0 → configured default
+	Auth     *RequestOptions // request credentials; nil → no auth
 }
 
 // Submit persists a new queued download at the given priority and enqueues it,
@@ -217,6 +218,7 @@ func (m *Manager) Submit(ctx context.Context, url string, priority Priority, opt
 		Status:       StatusQueued,
 		Priority:     priority,
 		SegmentCount: m.engine.clampSegments(opts.Segments),
+		Auth:         opts.Auth,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -284,14 +286,25 @@ func (m *Manager) Get(ctx context.Context, id string) (*Download, error) {
 func (m *Manager) foldLiveProgress(d *Download) {
 	m.mu.Lock()
 	prog := m.live[d.ID]
+	var segBps []int64
 	if rs := m.rates[d.ID]; rs != nil {
 		d.SpeedBps = rs.bps // live rate for an active job; left zero otherwise
+		// Copy the per-connection rates under the lock — the sampler mutates the
+		// same slice — so the fold below reads a stable snapshot off the lock.
+		if len(rs.segBps) > 0 {
+			segBps = append([]int64(nil), rs.segBps...)
+		}
 	}
 	m.mu.Unlock()
 	if prog == nil || len(prog.completed) < len(d.Segments) {
 		return
 	}
 	prog.snapshotInto(d.Segments)
+	for i := range d.Segments {
+		if i < len(segBps) {
+			d.Segments[i].SpeedBps = segBps[i]
+		}
+	}
 }
 
 // Pause stops the running transfer (if any) but keeps the checkpointed .part
@@ -462,6 +475,24 @@ func (m *Manager) SetPriority(ctx context.Context, id string, priority Priority)
 		}
 	}
 	m.mu.Unlock()
+	return nil
+}
+
+// SetAuth replaces a download's stored credentials and persists them (the store
+// encrypts them at rest). It does not change status, so the caller pairs it with
+// Resume to retry a download that failed for want of — or with wrong —
+// credentials. A nil auth clears any stored credentials. An active download keeps
+// running with its old credentials; the new ones take effect on its next run.
+func (m *Manager) SetAuth(ctx context.Context, id string, auth *RequestOptions) error {
+	d, err := m.store.LoadDownload(ctx, id)
+	if err != nil {
+		return fmt.Errorf("engine: manager set-auth %q: %w", id, err)
+	}
+	d.Auth = auth
+	d.UpdatedAt = time.Now().UTC()
+	if err := m.store.SaveDownload(ctx, d); err != nil {
+		return fmt.Errorf("engine: manager set-auth persist %q: %w", id, err)
+	}
 	return nil
 }
 

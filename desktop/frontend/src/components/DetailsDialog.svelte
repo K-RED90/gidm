@@ -1,10 +1,12 @@
 <script lang="ts">
   import { fade, scale } from 'svelte/transition'
   import Icon from './Icon.svelte'
-  import { DownloadStatus, copyText, openPath, revealPath, type DownloadView } from '../lib/bridge'
+  import { Bridge, DownloadStatus, copyText, openPath, revealPath, type DownloadView } from '../lib/bridge'
   import { store } from '../lib/store.svelte'
+  import { toaster, errMessage } from '../lib/toast.svelte'
   import { STATUS_LABEL } from '../lib/status'
   import { fileName, humanEta, humanSize, humanSpeed, percent } from '../lib/format'
+  import { buildCredentials, headerLines, parseHeaderLines } from '../lib/auth'
 
   // id is the download to inspect, or null when closed. The detail is derived live
   // from the store's polled snapshot, so the dialog updates every tick on its own.
@@ -23,7 +25,13 @@
     if (!segs || segs.length === 0) return []
     return segs.map((s) => {
       const size = s.end - s.start + 1
-      return { index: s.index, size, done: s.completed, pct: size > 0 ? Math.min(100, (s.completed / size) * 100) : 0 }
+      return {
+        index: s.index,
+        size,
+        done: s.completed,
+        speed: s.speed_bps ?? 0,
+        pct: size > 0 ? Math.min(100, (s.completed / size) * 100) : 0,
+      }
     })
   })
 
@@ -32,6 +40,71 @@
   const motionMs = reduceMotion ? 0 : 150
 
   let cardEl = $state<HTMLElement>()
+
+  // --- editable authentication (IDM-style File Properties Login/Password) -------
+  // The password is never returned by the daemon (only has_password), so the field
+  // starts blank and "unchanged" means keep the stored one.
+  let showAuth = $state(false)
+  let euser = $state('')
+  let epassword = $state('')
+  let ereferer = $state('')
+  let ecookie = $state('')
+  let eheadersText = $state('')
+  let saving = $state(false)
+  // syncedId guards the reset effect so a 1s poll tick never clobbers in-progress
+  // edits — the editor re-seeds only when the dialog opens for a different download.
+  let syncedId: string | null = null
+
+  $effect(() => {
+    if (id === syncedId) return
+    syncedId = id
+    const a = d?.auth
+    euser = a?.username ?? ''
+    ereferer = a?.referer ?? ''
+    ecookie = a?.cookie ?? ''
+    eheadersText = headerLines(a?.headers)
+    epassword = ''
+    showAuth = !!a // start expanded when the download already has credentials
+  })
+
+  const hasStoredPassword = $derived(!!d?.auth?.has_password)
+  const dirty = $derived(
+    epassword !== '' ||
+      euser.trim() !== (d?.auth?.username ?? '') ||
+      ereferer.trim() !== (d?.auth?.referer ?? '') ||
+      ecookie.trim() !== (d?.auth?.cookie ?? '') ||
+      eheadersText.trim() !== headerLines(d?.auth?.headers).trim(),
+  )
+  const canRetry = $derived(
+    !!d && (d.status === DownloadStatus.StatusFailed || d.status === DownloadStatus.StatusPaused),
+  )
+
+  async function save(retry: boolean): Promise<void> {
+    if (!d || saving) return
+    saving = true
+    try {
+      const creds = buildCredentials({
+        username: euser,
+        password: epassword,
+        referer: ereferer,
+        cookie: ecookie,
+        headers: parseHeaderLines(eheadersText),
+      })
+      // Keep the stored password only when the user left the field blank and one
+      // exists; typing a new password (or clearing with none stored) replaces it.
+      const keepPassword = hasStoredPassword && epassword === ''
+      await Bridge.SetAuth(d.id, creds, keepPassword)
+      if (retry) await Bridge.Resume(d.id)
+      syncedId = null // re-seed from the freshly stored state on the next render
+      epassword = ''
+      await store.refresh()
+      toaster.success(retry ? 'Saved — retrying download' : 'Authentication saved')
+    } catch (e) {
+      toaster.error(errMessage(e))
+    } finally {
+      saving = false
+    }
+  }
 
   function fmtDate(iso: string | undefined): string {
     if (!iso) return '—'
@@ -113,6 +186,53 @@
           {/if}
         </dl>
 
+        <!-- Editable authentication (IDM File Properties: Login / Password / Referer). -->
+        <section class="auth">
+          <button
+            type="button"
+            class="auth-head"
+            aria-expanded={showAuth}
+            onclick={() => (showAuth = !showAuth)}
+          >
+            <Icon name={showAuth ? 'chevronDown' : 'chevronRight'} size={14} />
+            <span>Authentication</span>
+            {#if d.auth}<span class="badge">set</span>{/if}
+          </button>
+
+          {#if showAuth}
+            <div class="auth-body">
+              <div class="auth-row">
+                <label class="afield">
+                  <span class="alabel">Login</span>
+                  <input class="ainput" type="text" bind:value={euser} autocomplete="off" spellcheck="false" />
+                </label>
+                <label class="afield">
+                  <span class="alabel">Password</span>
+                  <input
+                    class="ainput"
+                    type="password"
+                    bind:value={epassword}
+                    placeholder={hasStoredPassword ? '•••••• (unchanged)' : ''}
+                    autocomplete="off"
+                  />
+                </label>
+              </div>
+              <label class="afield">
+                <span class="alabel">Referer</span>
+                <input class="ainput" type="text" bind:value={ereferer} placeholder="https://…" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="afield">
+                <span class="alabel">Cookie</span>
+                <input class="ainput mono" type="text" bind:value={ecookie} placeholder="name=value" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="afield">
+                <span class="alabel">Headers</span>
+                <textarea class="ainput mono area" bind:value={eheadersText} rows="2" placeholder={'X-Header: value\nOne per line'} spellcheck="false"></textarea>
+              </label>
+            </div>
+          {/if}
+        </section>
+
         {#if conns.length > 0}
           <section class="conns">
             <div class="conns-head">
@@ -132,6 +252,7 @@
                   <span class="cn">{c.index + 1}</span>
                   <div class="cbar"><div class="cbar-fill" style:width="{c.pct}%"></div></div>
                   <span class="cdone">{humanSize(c.done)} / {humanSize(c.size)}</span>
+                  <span class="cspeed">{c.speed > 0 ? humanSpeed(c.speed) : '—'}</span>
                   <span class="cpct">{Math.round(c.pct)}%</span>
                 </li>
               {/each}
@@ -153,7 +274,18 @@
           <Icon name="copy" size={14} /> Copy URL
         </button>
         <span class="spacer"></span>
-        <button type="button" class="primary" onclick={onClose}>Close</button>
+        {#if dirty}
+          {#if canRetry}
+            <button type="button" class="ghost" disabled={saving} onclick={() => void save(true)}>
+              <Icon name="refresh" size={14} /> Save &amp; Retry
+            </button>
+          {/if}
+          <button type="button" class="primary" disabled={saving} onclick={() => void save(false)}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        {:else}
+          <button type="button" class="primary" onclick={onClose}>Close</button>
+        {/if}
       </footer>
     </div>
   </div>
@@ -411,11 +543,17 @@
   }
   .conn-list li {
     display: grid;
-    grid-template-columns: 18px 1fr auto auto;
+    grid-template-columns: 18px 1fr auto auto auto;
     align-items: center;
     gap: var(--space-2);
     font-size: var(--text-xs);
     color: var(--muted);
+  }
+  .cspeed {
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    min-width: 60px;
+    text-align: right;
   }
   .cn {
     color: var(--faint);
@@ -441,6 +579,102 @@
     color: var(--faint);
     min-width: 30px;
     text-align: right;
+  }
+
+  /* Editable authentication section */
+  .auth {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
+  }
+  .auth-head {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    align-self: flex-start;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--faint);
+    cursor: pointer;
+  }
+  .auth-head:hover {
+    color: var(--text);
+  }
+  .auth-head .badge {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 0 var(--space-2);
+  }
+  .auth-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .auth-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+  .afield {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .alabel {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--faint);
+  }
+  .ainput {
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+    padding: 0 var(--space-3);
+  }
+  .ainput::placeholder {
+    color: var(--faint);
+  }
+  .ainput:focus {
+    outline: 0;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .ainput.mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+  .ainput.area {
+    height: auto;
+    min-height: 48px;
+    padding: var(--space-2) var(--space-3);
+    resize: vertical;
+    line-height: 1.5;
+  }
+  .foot button:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .foot {

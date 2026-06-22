@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -13,6 +14,11 @@ import (
 func (s *Store) SaveDownload(ctx context.Context, d *engine.Download) error {
 	if d == nil {
 		return errors.New("sqlite: save download: nil download")
+	}
+
+	cred, err := s.sealCredentials(d)
+	if err != nil {
+		return fmt.Errorf("sqlite: save download %q: %w", d.ID, err)
 	}
 
 	s.mu.Lock()
@@ -27,7 +33,7 @@ func (s *Store) SaveDownload(ctx context.Context, d *engine.Download) error {
 	_, err = tx.ExecContext(ctx, upsertDownload,
 		d.ID, d.URL, d.Destination, d.TotalSize, string(d.Status),
 		d.ETag, d.LastModified, d.Checksum,
-		formatTime(d.CreatedAt), formatTime(d.UpdatedAt), int(d.Priority), d.SegmentCount, d.MaxRate,
+		formatTime(d.CreatedAt), formatTime(d.UpdatedAt), int(d.Priority), d.SegmentCount, d.MaxRate, cred,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: save download %q: %w", d.ID, err)
@@ -46,7 +52,7 @@ func (s *Store) SaveDownload(ctx context.Context, d *engine.Download) error {
 // LoadDownload returns the download with its segments ordered by index, or
 // engine.ErrNotFound if no such download exists.
 func (s *Store) LoadDownload(ctx context.Context, id string) (*engine.Download, error) {
-	d, err := scanDownload(s.db.QueryRowContext(ctx, selectDownload, id))
+	d, err := s.scanDownload(s.db.QueryRowContext(ctx, selectDownload, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("sqlite: load download %q: %w", id, engine.ErrNotFound)
 	}
@@ -72,7 +78,7 @@ func (s *Store) ListDownloads(ctx context.Context) ([]*engine.Download, error) {
 
 	downloads := []*engine.Download{}
 	for rows.Next() {
-		d, err := scanDownload(rows)
+		d, err := s.scanDownload(rows)
 		if err != nil {
 			return nil, fmt.Errorf("sqlite: list downloads: %w", err)
 		}
@@ -108,15 +114,16 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanDownload(sc rowScanner) (*engine.Download, error) {
+func (s *Store) scanDownload(sc rowScanner) (*engine.Download, error) {
 	var (
 		d                    engine.Download
 		status               string
 		createdAt, updatedAt string
 		priority             int
+		cred                 []byte // sealed credentials blob; NULL → nil
 	)
 	err := sc.Scan(&d.ID, &d.URL, &d.Destination, &d.TotalSize, &status,
-		&d.ETag, &d.LastModified, &d.Checksum, &createdAt, &updatedAt, &priority, &d.SegmentCount, &d.MaxRate)
+		&d.ETag, &d.LastModified, &d.Checksum, &createdAt, &updatedAt, &priority, &d.SegmentCount, &d.MaxRate, &cred)
 	if err != nil {
 		return nil, err
 	}
@@ -129,13 +136,55 @@ func scanDownload(sc rowScanner) (*engine.Download, error) {
 	if d.UpdatedAt, err = parseTime(updatedAt); err != nil {
 		return nil, fmt.Errorf("updated_at %q: %w", updatedAt, err)
 	}
+	d.Auth = s.openCredentials(cred)
 	return &d, nil
+}
+
+// sealCredentials marshals and encrypts a download's credentials for storage,
+// returning nil (stored as SQL NULL) when there are none. Credentials require a
+// vault — refusing to write them in the clear is the whole point — so a nil vault
+// with credentials present is an error, not a silent plaintext write.
+func (s *Store) sealCredentials(d *engine.Download) ([]byte, error) {
+	if d.Auth == nil {
+		return nil, nil
+	}
+	if s.vault == nil {
+		return nil, errors.New("credentials require an encryption vault")
+	}
+	raw, err := json.Marshal(d.Auth)
+	if err != nil {
+		return nil, fmt.Errorf("marshal credentials: %w", err)
+	}
+	sealed, err := s.vault.Seal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("seal credentials: %w", err)
+	}
+	return sealed, nil
+}
+
+// openCredentials decrypts a stored credentials blob. It degrades to nil (no
+// auth) for an empty blob, a missing vault, or a decrypt/parse failure — a lost
+// or rotated key must not make the whole record unreadable; the download simply
+// loses its credentials until they are re-entered.
+func (s *Store) openCredentials(blob []byte) *engine.RequestOptions {
+	if len(blob) == 0 || s.vault == nil {
+		return nil
+	}
+	raw, err := s.vault.Open(blob)
+	if err != nil {
+		return nil
+	}
+	var auth engine.RequestOptions
+	if err := json.Unmarshal(raw, &auth); err != nil {
+		return nil
+	}
+	return &auth
 }
 
 const upsertDownload = `
 INSERT INTO downloads
-	(id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	(id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate, credentials)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	url           = excluded.url,
 	destination   = excluded.destination,
@@ -147,14 +196,15 @@ ON CONFLICT(id) DO UPDATE SET
 	updated_at    = excluded.updated_at,
 	priority      = excluded.priority,
 	segment_count = excluded.segment_count,
-	max_rate      = excluded.max_rate;`
+	max_rate      = excluded.max_rate,
+	credentials   = excluded.credentials;`
 
 const selectDownload = `
-SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate
+SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate, credentials
 FROM downloads WHERE id = ?;`
 
 const selectDownloads = `
-SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate
+SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate, credentials
 FROM downloads ORDER BY created_at, id;`
 
 const deleteDownload = `DELETE FROM downloads WHERE id = ?;`

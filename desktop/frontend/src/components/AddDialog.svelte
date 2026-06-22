@@ -1,8 +1,9 @@
 <script lang="ts">
   import { fade, scale } from 'svelte/transition'
   import Icon from './Icon.svelte'
-  import { Bridge, Priority, pickDirectory } from '../lib/bridge'
+  import { Bridge, Priority, pickDirectory, type Credentials } from '../lib/bridge'
   import { store } from '../lib/store.svelte'
+  import { buildCredentials, parseHeaderLines } from '../lib/auth'
 
   let { open = false, onClose }: { open?: boolean; onClose: () => void } = $props()
 
@@ -23,6 +24,21 @@
   let error = $state('')
   let busy = $state(false)
   let cardEl = $state<HTMLElement>()
+
+  // Optional request auth, collapsed by default so the common add stays clean.
+  let showAuth = $state(false)
+  let username = $state('')
+  let password = $state('')
+  let referer = $state('')
+  let cookie = $state('')
+  let headersText = $state('')
+
+  // hasAuth drives the disclosure's "set" hint without re-parsing on every render.
+  const hasAuth = $derived(
+    !!(username.trim() || password || referer.trim() || cookie.trim() || headersText.trim()),
+  )
+  // Warn when Basic auth would be sent over plain http (credentials in the clear).
+  const insecureAuth = $derived(url.trim().toLowerCase().startsWith('http://') && !!(username || password))
 
   // suggestedName mirrors what the daemon derives when Name is left blank, shown as
   // the placeholder so the user sees the resulting filename without us syncing state.
@@ -46,6 +62,22 @@
     segments = 0
     priority = Priority.PriorityNormal
     error = ''
+    showAuth = false
+    username = ''
+    password = ''
+    referer = ''
+    cookie = ''
+    headersText = ''
+  }
+
+  function auth(): Credentials {
+    return buildCredentials({
+      username,
+      password,
+      referer,
+      cookie,
+      headers: parseHeaderLines(headersText),
+    })
   }
 
   function close(): void {
@@ -65,7 +97,7 @@
     busy = true
     error = ''
     try {
-      await Bridge.Add(u, dir, filename.trim(), segments, priority)
+      await Bridge.Add(u, dir, filename.trim(), segments, priority, auth())
       reset()
       onClose()
       await store.refresh()
@@ -222,6 +254,57 @@
               {/each}
             </div>
           </div>
+        </div>
+
+        <div class="auth">
+          <button
+            type="button"
+            class="disclosure"
+            aria-expanded={showAuth}
+            onclick={() => (showAuth = !showAuth)}
+          >
+            <Icon name={showAuth ? 'chevronDown' : 'chevronRight'} size={14} />
+            <span>Authentication &amp; headers</span>
+            {#if hasAuth}<span class="badge">set</span>{:else}<span class="opt">optional</span>{/if}
+          </button>
+
+          {#if showAuth}
+            <div class="auth-body">
+              <div class="row2">
+                <label class="field">
+                  <span class="flabel">Login</span>
+                  <input class="input" type="text" bind:value={username} autocomplete="off" spellcheck="false" />
+                </label>
+                <label class="field">
+                  <span class="flabel">Password</span>
+                  <input class="input" type="password" bind:value={password} autocomplete="off" />
+                </label>
+              </div>
+              <label class="field">
+                <span class="flabel">Referer</span>
+                <input class="input" type="text" bind:value={referer} placeholder="https://…" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="flabel">Cookie</span>
+                <input class="input mono" type="text" bind:value={cookie} placeholder="name=value; name2=value2" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="field">
+                <span class="flabel">Headers</span>
+                <textarea
+                  class="input mono area"
+                  bind:value={headersText}
+                  rows="2"
+                  placeholder={'X-Header: value\nOne per line'}
+                  spellcheck="false"
+                ></textarea>
+              </label>
+              {#if insecureAuth}
+                <p class="warn" role="status">
+                  <Icon name="alert" size={13} /> This URL is plain http — the password will be sent unencrypted.
+                </p>
+              {/if}
+            </div>
+          {/if}
         </div>
 
         {#if error}
@@ -492,6 +575,68 @@
     margin: 0;
     color: var(--danger);
     font-size: var(--text-sm);
+  }
+
+  /* Auth disclosure: a quiet, full-width toggle so the common add stays clean. */
+  .auth {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .disclosure {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    align-self: flex-start;
+    border: 0;
+    background: transparent;
+    padding: 2px 0;
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .disclosure:hover {
+    color: var(--text);
+  }
+  .disclosure :global(svg) {
+    color: var(--faint);
+  }
+  .disclosure .opt {
+    font-weight: 500;
+    color: var(--faint);
+  }
+  .disclosure .badge {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 1px var(--space-2);
+  }
+  .auth-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .area {
+    height: auto;
+    min-height: 56px;
+    padding: var(--space-2) var(--space-3);
+    resize: vertical;
+    line-height: 1.5;
+  }
+  .warn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: 0;
+    color: var(--warning);
+    font-size: var(--text-xs);
+  }
+  .warn :global(svg) {
+    color: var(--warning);
   }
 
   .foot {
