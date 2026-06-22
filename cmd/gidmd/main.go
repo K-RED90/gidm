@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -74,6 +75,12 @@ func serve(cfg *config.Config, log *slog.Logger) error {
 		"db", cfg.Storage.DBPath,
 		"max_concurrent", cfg.Download.MaxConcurrent,
 	)
+
+	// On a fresh install the user config dir has no gidm subdirectory yet, so the
+	// store open and socket bind below would both fail. Create them up front.
+	if err := ensureRuntimeDirs(cfg); err != nil {
+		return err
+	}
 
 	client, err := httpx.New(cfg.Network, cfg.Download)
 	if err != nil {
@@ -149,6 +156,19 @@ func drainManager(mgr *engine.Manager, cfg *config.Config, log *slog.Logger) {
 	if err := mgr.Shutdown(shutdownCtx); err != nil {
 		log.Warn("gidmd: manager shutdown", "err", err)
 	}
+}
+
+// ensureRuntimeDirs creates the parent directories of the database and control
+// socket. 0700 keeps the local-only daemon's data and socket private to the
+// user (security by design); MkdirAll is idempotent, so the common case where
+// the database and socket share a directory creates it once.
+func ensureRuntimeDirs(cfg *config.Config) error {
+	for _, dir := range []string{filepath.Dir(cfg.Storage.DBPath), filepath.Dir(cfg.Daemon.SocketPath)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("gidmd: create dir %q: %w", dir, err)
+		}
+	}
+	return nil
 }
 
 func newLogger(c config.Log) *slog.Logger {
