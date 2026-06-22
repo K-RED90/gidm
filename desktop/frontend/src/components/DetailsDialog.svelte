@@ -181,12 +181,12 @@
   }
   .card {
     pointer-events: auto;
-    width: min(600px, 100%);
+    width: min(560px, 100%);
     max-height: calc(100vh - 2 * var(--space-5));
-    background: var(--surface-2);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.85);
+    box-shadow: var(--shadow-overlay);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -201,7 +201,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    padding: 20px 24px 12px;
+    padding: var(--space-4) var(--space-5);
     min-width: 0;
   }
   .title {
@@ -231,13 +231,13 @@
   .x {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: 30px;
+    height: 30px;
     flex: none;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--faint);
+    color: var(--muted);
     cursor: pointer;
   }
   .x:hover {
@@ -249,12 +249,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: 0 24px 24px;
+    padding: 0 var(--space-5) var(--space-4);
     overflow-y: auto;
   }
 
   .overall .bar {
-    height: 8px;
+    height: 6px;
     border-radius: 999px;
     background: var(--track);
     overflow: hidden;
@@ -296,17 +296,14 @@
   .props {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 6px;
+    gap: var(--space-2) var(--space-4);
     margin: 0;
   }
   .props > div {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     min-width: 0;
-    padding: 10px 12px;
-    background: var(--surface-3);
-    border-radius: 8px;
   }
   .props .wide {
     grid-column: 1 / -1;
@@ -314,6 +311,8 @@
   dt {
     font-size: var(--text-xs);
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     color: var(--faint);
   }
   dd {
@@ -368,6 +367,8 @@
     align-items: baseline;
     font-size: var(--text-xs);
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     color: var(--faint);
   }
   .conns-head .muted {
@@ -446,7 +447,9 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 12px 24px 20px;
+    padding: var(--space-4) var(--space-5);
+    border-top: 1px solid var(--border);
+    background: var(--bg);
   }
   .foot .spacer {
     flex: 1;
@@ -455,21 +458,21 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    border: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     font: inherit;
     font-weight: 600;
     font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-3);
     cursor: pointer;
   }
   .ghost {
     background: transparent;
-    color: var(--muted);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-3);
+    border-color: var(--border-strong);
+    color: var(--text);
   }
   .ghost:hover {
     background: var(--surface-2);
-    color: var(--text);
   }
   .ghost :global(svg) {
     color: var(--muted);
@@ -477,9 +480,6 @@
   .primary {
     background: var(--accent);
     color: var(--accent-contrast);
-    border-radius: 999px;
-    padding: 0 var(--space-4);
-    height: 34px;
   }
   .primary:hover {
     background: var(--accent-hover);

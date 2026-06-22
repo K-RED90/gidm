@@ -269,11 +269,11 @@
 
   .card {
     pointer-events: auto;
-    width: min(520px, 100%);
-    background: var(--surface-2);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    width: min(480px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.85);
+    box-shadow: var(--shadow-overlay);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -289,24 +289,24 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 24px 12px;
+    padding: var(--space-4) var(--space-5);
   }
   .head h2 {
     margin: 0;
     font-family: var(--font-serif);
-    font-size: var(--text-lg);
+    font-size: var(--text-xl);
     font-weight: 600;
     letter-spacing: -0.01em;
   }
   .x {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: 30px;
+    height: 30px;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--faint);
+    color: var(--muted);
     cursor: pointer;
   }
   .x:hover {
@@ -318,7 +318,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: 0 24px 24px;
+    padding: 0 var(--space-5) var(--space-5);
   }
 
   .field {
@@ -330,16 +330,18 @@
   .flabel {
     font-size: var(--text-xs);
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     color: var(--muted);
   }
 
   .input {
     width: 100%;
     min-width: 0;
-    height: 36px;
-    border: 1px solid var(--border-strong);
-    border-radius: 10px;
-    background: var(--surface-2);
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
     color: var(--text);
     font: inherit;
     font-size: var(--text-md);
@@ -365,7 +367,6 @@
     width: 96px;
     flex: none;
     font-variant-numeric: tabular-nums;
-    border-radius: 8px;
   }
 
   .folder {
@@ -383,9 +384,9 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    height: 36px;
+    height: 38px;
     border: 1px solid var(--border-strong);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     background: var(--surface-2);
     color: var(--text);
     font: inherit;
@@ -414,11 +415,11 @@
   .stepper {
     display: inline-flex;
     align-items: center;
-    height: 36px;
+    height: 38px;
     width: fit-content;
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
     overflow: hidden;
   }
   .stepper button {
@@ -439,12 +440,12 @@
     cursor: default;
   }
   .stepper-val {
-    min-width: 44px;
+    min-width: 54px;
     text-align: center;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     font-size: var(--text-sm);
-    border-inline: 1px solid var(--border-strong);
+    border-inline: 1px solid var(--border);
     align-self: stretch;
     display: grid;
     place-items: center;
@@ -452,32 +453,31 @@
 
   .segmented {
     display: flex;
-    height: 36px;
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    background: var(--surface-2);
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
     padding: 3px;
-    gap: 2px;
+    gap: 3px;
   }
   .segmented button {
     flex: 1;
     border: 0;
-    border-radius: 999px;
+    border-radius: 4px;
     background: transparent;
     color: var(--muted);
     font: inherit;
     font-size: var(--text-sm);
     font-weight: 550;
     cursor: pointer;
-    transition: background 0.12s, color 0.12s;
   }
   .segmented button:hover {
     color: var(--text);
   }
   .segmented button.selected {
     background: var(--surface-3);
-    color: var(--text);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    color: var(--accent);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 
   .ratefield {
@@ -487,10 +487,10 @@
   }
   .unit {
     flex: none;
-    height: 36px;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    background: var(--surface-2);
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
     color: var(--text);
     font: inherit;
     font-size: var(--text-sm);
@@ -517,35 +517,31 @@
   .foot {
     display: flex;
     justify-content: flex-end;
-    align-items: center;
     gap: var(--space-2);
-    padding: 12px 24px 20px;
+    padding: var(--space-4) var(--space-5);
+    border-top: 1px solid var(--border);
+    background: var(--bg);
   }
   .foot button {
-    display: inline-flex;
-    align-items: center;
-    border: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     font: inherit;
     font-weight: 600;
     font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-4);
     cursor: pointer;
   }
   .ghost {
     background: transparent;
-    color: var(--muted);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-3);
+    border-color: var(--border-strong);
+    color: var(--text);
   }
   .ghost:hover {
     background: var(--surface-2);
-    color: var(--text);
   }
   .primary {
     background: var(--accent);
     color: var(--accent-contrast);
-    border-radius: 999px;
-    padding: 0 var(--space-4);
-    height: 34px;
   }
   .primary:hover:not(:disabled) {
     background: var(--accent-hover);
