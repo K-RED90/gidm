@@ -79,6 +79,17 @@ func (p *segProgress) total() int64 {
 // load reads segment idx's completed bytes atomically.
 func (p *segProgress) load(idx int) int64 { return p.completed[idx].Load() }
 
+// loadAll snapshots every slot's completed bytes into a fresh slice, for the rate
+// sampler to difference per connection over time. Off the hot path (once per
+// sample tick), so the allocation is immaterial.
+func (p *segProgress) loadAll() []int64 {
+	out := make([]int64, len(p.completed))
+	for i := range p.completed {
+		out[i] = p.completed[i].Load()
+	}
+	return out
+}
+
 // store sets segment idx's completed bytes atomically. Only the owning worker
 // writes its index, so there is never write-write contention.
 func (p *segProgress) store(idx int, v int64) { p.completed[idx].Store(v) }

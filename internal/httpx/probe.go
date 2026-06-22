@@ -23,8 +23,9 @@ type ProbeResult struct {
 // validators without downloading the body. A 206 confirms ranges and carries the
 // total in Content-Range; a 200 means the server ignored the range, so size comes
 // from Content-Length and range support from Accept-Ranges.
-func (c *Client) Probe(ctx context.Context, rawURL string) (*ProbeResult, error) {
+func (c *Client) Probe(ctx context.Context, rawURL string, opts RequestOptions) (*ProbeResult, error) {
 	resp, err := c.do(ctx, http.MethodGet, rawURL, func(req *http.Request) {
+		opts.apply(req)
 		req.Header.Set("Range", "bytes=0-0")
 	})
 	if err != nil {

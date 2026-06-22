@@ -180,3 +180,54 @@ func TestValidateID(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCredentials(t *testing.T) {
+	tests := []struct {
+		name    string
+		creds   Credentials
+		wantErr bool
+	}{
+		{"empty", Credentials{}, false},
+		{"basic auth", Credentials{Username: "u", Password: "p"}, false},
+		{"referer + cookie", Credentials{Referer: "https://ref/", Cookie: "sid=abc"}, false},
+		{"ok custom header", Credentials{Headers: map[string]string{"X-Token": "abc.def"}}, false},
+		{"crlf in password", Credentials{Password: "p\r\nX-Evil: 1"}, true},
+		{"crlf in referer", Credentials{Referer: "a\nb"}, true},
+		{"crlf in header value", Credentials{Headers: map[string]string{"X-A": "v\r\nB: 2"}}, true},
+		{"bad header name", Credentials{Headers: map[string]string{"X Bad": "v"}}, true},
+		{"empty header name", Credentials{Headers: map[string]string{"": "v"}}, true},
+		{"reserved header host", Credentials{Headers: map[string]string{"Host": "evil"}}, true},
+		{"reserved header authorization", Credentials{Headers: map[string]string{"authorization": "Bearer x"}}, true},
+		{"reserved header cookie", Credentials{Headers: map[string]string{"Cookie": "sid=1"}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCredentials(tt.creds)
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalidCredentials) {
+					t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestValidateAddRejectsBadAuth(t *testing.T) {
+	a := Add{URL: "https://example.com/f", Auth: &Credentials{Password: "x\r\nEvil: 1"}}
+	if err := ValidateAdd(a); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+func TestValidateSetAuth(t *testing.T) {
+	if err := ValidateSetAuth(SetAuth{ID: "", Auth: Credentials{}}); !errors.Is(err, ErrEmptyID) {
+		t.Fatalf("empty id: err = %v, want ErrEmptyID", err)
+	}
+	if err := ValidateSetAuth(SetAuth{ID: "abc", Auth: Credentials{Username: "u", Password: "p"}}); err != nil {
+		t.Fatalf("valid set-auth: err = %v, want nil", err)
+	}
+}

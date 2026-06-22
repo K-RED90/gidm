@@ -12,6 +12,7 @@ import (
 	_ "embed"
 
 	"github.com/K-RED90/gidm/internal/engine"
+	"github.com/K-RED90/gidm/internal/secret"
 
 	// Registers the pure-Go "sqlite" driver for database/sql.
 	_ "modernc.org/sqlite"
@@ -51,11 +52,26 @@ const closeTimeout = 5 * time.Second
 type Store struct {
 	db *sql.DB
 	mu sync.Mutex
+
+	// vault encrypts/decrypts the per-download credentials column. nil keeps the
+	// store usable for downloads without auth (the common case and every existing
+	// test); persisting credentials without a vault is refused rather than written
+	// in the clear.
+	vault secret.Vault
+}
+
+// Option customizes a Store at construction.
+type Option func(*Store)
+
+// WithVault wires the encryption vault used to seal per-download credentials at
+// rest. Without it, credential-bearing downloads cannot be persisted.
+func WithVault(v secret.Vault) Option {
+	return func(s *Store) { s.vault = v }
 }
 
 // New opens (creating if needed) the database at path, applies pragmas, and
 // creates the schema idempotently.
-func New(path string) (*Store, error) {
+func New(path string, opts ...Option) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("sqlite: empty database path")
 	}
@@ -68,6 +84,9 @@ func New(path string) (*Store, error) {
 	db.SetConnMaxIdleTime(connMaxIdleTime)
 
 	s := &Store{db: db}
+	for _, opt := range opts {
+		opt(s)
+	}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -99,6 +118,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	// "inherit the engine default", so rows written before it existed are uncapped
 	// exactly as before.
 	if err := s.ensureColumn(ctx, "downloads", "max_rate", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// credentials holds the sealed per-download auth blob (NULL when none). A
+	// nullable BLOB has no default, so rows written before it existed load with
+	// NULL credentials — i.e. no auth — exactly as before.
+	if err := s.ensureColumn(ctx, "downloads", "credentials", "BLOB"); err != nil {
 		return err
 	}
 	return nil

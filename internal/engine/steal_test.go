@@ -111,11 +111,11 @@ type stragglerFetcher struct {
 	rangeReqs [][2]int64
 }
 
-func (f *stragglerFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
+func (f *stragglerFetcher) Probe(_ context.Context, url string, _ RequestOptions) (ProbeInfo, error) {
 	return ProbeInfo{FinalURL: url, Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: "straggler.bin"}, nil
 }
 
-func (f *stragglerFetcher) RangeGet(ctx context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *stragglerFetcher) RangeGet(ctx context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	f.mu.Lock()
 	f.rangeReqs = append(f.rangeReqs, [2]int64{start, end})
 	f.mu.Unlock()
@@ -127,7 +127,7 @@ func (f *stragglerFetcher) RangeGet(ctx context.Context, _ string, start, end in
 	return io.NopCloser(&bytesReader{data: chunk}), nil
 }
 
-func (f *stragglerFetcher) Get(_ context.Context, _ string) (io.ReadCloser, error) {
+func (f *stragglerFetcher) Get(_ context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	return io.NopCloser(&bytesReader{data: append([]byte(nil), f.content...)}), nil
 }
 
@@ -465,11 +465,11 @@ type slowSegFetcher struct {
 	slowed   atomic.Bool
 }
 
-func (f *slowSegFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
+func (f *slowSegFetcher) Probe(_ context.Context, url string, _ RequestOptions) (ProbeInfo, error) {
 	return ProbeInfo{FinalURL: url, Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: "slow.bin"}, nil
 }
 
-func (f *slowSegFetcher) RangeGet(_ context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *slowSegFetcher) RangeGet(_ context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	chunk := make([]byte, end-start+1)
 	copy(chunk, f.content[start:end+1])
 	if start >= f.slowFrom && !f.slowed.Swap(true) {
@@ -478,7 +478,7 @@ func (f *slowSegFetcher) RangeGet(_ context.Context, _ string, start, end int64)
 	return io.NopCloser(&bytesReader{data: chunk}), nil
 }
 
-func (f *slowSegFetcher) Get(_ context.Context, _ string) (io.ReadCloser, error) {
+func (f *slowSegFetcher) Get(_ context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	return io.NopCloser(&bytesReader{data: append([]byte(nil), f.content...)}), nil
 }
 

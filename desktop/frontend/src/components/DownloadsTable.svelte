@@ -103,9 +103,10 @@
 
   function onRowDblClick(e: MouseEvent, d: DownloadView): void {
     if ((e.target as HTMLElement).closest('button')) return
-    // a finished file opens directly; anything else opens its properties.
-    if (d.status === DownloadStatus.StatusCompleted) void doOpen(d.destination)
-    else onDetails(d.id)
+    // Double-click always opens File Properties (IDM-style). Opening the file
+    // itself stays available via the context menu and the properties dialog, so a
+    // completed download never launches unexpectedly on a stray double-click.
+    onDetails(d.id)
   }
 
   function onRowContextMenu(e: MouseEvent, d: DownloadView): void {

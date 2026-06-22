@@ -44,6 +44,7 @@ func toView(d *engine.Download, full bool) api.DownloadView {
 		MaxRate:      d.MaxRate,
 		CreatedAt:    formatTime(d.CreatedAt),
 		UpdatedAt:    formatTime(d.UpdatedAt),
+		Auth:         authToView(d.Auth),
 	}
 	if full || d.Status == engine.StatusActive || d.Status == engine.StatusPaused {
 		v.Segments = segmentsToView(d.Segments)
@@ -86,16 +87,33 @@ func applyConfigPatch(cur engine.Settings, sc api.SetConfig) engine.Settings {
 	return cur
 }
 
-// segmentsToView projects the engine's per-segment progress onto the wire shape.
+// segmentsToView projects the engine's per-segment progress (range, live bytes,
+// and per-connection speed) onto the wire shape.
 func segmentsToView(segs []engine.Segment) []api.SegmentView {
 	if len(segs) == 0 {
 		return nil
 	}
 	out := make([]api.SegmentView, len(segs))
 	for i, s := range segs {
-		out[i] = api.SegmentView{Index: s.Index, Start: s.Start, End: s.End, Completed: s.Completed}
+		out[i] = api.SegmentView{Index: s.Index, Start: s.Start, End: s.End, Completed: s.Completed, SpeedBps: s.SpeedBps}
 	}
 	return out
+}
+
+// authToView projects a download's stored credentials onto the read-side view,
+// deliberately omitting the password (HasPassword reports only its presence) so
+// it never crosses the wire back to a client.
+func authToView(a *engine.RequestOptions) *api.AuthView {
+	if a == nil {
+		return nil
+	}
+	return &api.AuthView{
+		Username:    a.Username,
+		Referer:     a.Referer,
+		Cookie:      a.Cookie,
+		Headers:     a.Headers,
+		HasPassword: a.Password != "",
+	}
 }
 
 // formatTime renders a timestamp as RFC3339, or "" for the zero value so the

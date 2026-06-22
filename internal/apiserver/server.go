@@ -41,6 +41,7 @@ type Manager interface {
 	SetRate(ctx context.Context, id string, bps int) error
 	Settings() engine.Settings
 	SetSettings(ctx context.Context, s engine.Settings) error
+	SetAuth(ctx context.Context, id string, auth *engine.RequestOptions) error
 }
 
 // ErrAlreadyRunning is returned by Serve when a live daemon already owns the

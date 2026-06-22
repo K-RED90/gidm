@@ -22,7 +22,7 @@ func TestGetStreamsFullBody(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	resp, err := c.Get(context.Background(), srv.URL)
+	resp, err := c.Get(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestGetRejectsNon2xx(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	resp, err := c.Get(context.Background(), srv.URL)
+	resp, err := c.Get(context.Background(), srv.URL, RequestOptions{})
 	if err == nil {
 		closeBody(t, resp)
 		t.Fatal("Get: expected error for non-2xx status")
@@ -66,7 +66,7 @@ func TestGetToleratesUnsolicited206(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	resp, err := c.Get(context.Background(), srv.URL)
+	resp, err := c.Get(context.Background(), srv.URL, RequestOptions{})
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

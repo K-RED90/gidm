@@ -25,6 +25,14 @@ type rateState struct {
 	lastBytes int64
 	lastAt    time.Time
 	bps       int64
+
+	// Per-connection smoothed rates, one slot per live segment (IDM-style
+	// per-connection speed). segLast is each slot's byte count at lastAt; segBps is
+	// its EWMA bytes/sec. The download's live counters are pre-sized to the
+	// work-stealing slot ceiling and never reallocated, so these slices, sized once
+	// from that count, stay index-aligned for the life of the download.
+	segLast []int64
+	segBps  []int64
 }
 
 // sampleLoop runs until the base context is cancelled (Shutdown), sampling every
@@ -55,23 +63,58 @@ func (m *Manager) sample(now time.Time) {
 		cur := prog.total()
 		rs := m.rates[id]
 		if rs == nil {
-			m.rates[id] = &rateState{lastBytes: cur, lastAt: now}
+			m.rates[id] = &rateState{
+				lastBytes: cur,
+				lastAt:    now,
+				segLast:   prog.loadAll(),
+				segBps:    make([]int64, len(prog.completed)),
+			}
 			continue
 		}
 		dt := now.Sub(rs.lastAt).Seconds()
 		if dt <= 0 {
 			continue
 		}
-		inst := float64(cur-rs.lastBytes) / dt
-		if inst < 0 {
-			inst = 0 // counters fell (a restart from scratch); never report negative
-		}
-		if rs.bps == 0 {
-			rs.bps = int64(inst)
-		} else {
-			rs.bps = int64(rateEWMAAlpha*inst + (1-rateEWMAAlpha)*float64(rs.bps))
-		}
+		rs.bps = ewma(rs.bps, instRate(cur, rs.lastBytes, dt))
 		rs.lastBytes = cur
+		sampleSegments(rs, prog, dt)
 		rs.lastAt = now
 	}
+}
+
+// sampleSegments folds one per-connection rate observation into rs.segBps. The
+// slices are seeded to the live slot count (stable for the download's life), so a
+// length guard only ever re-seeds defensively.
+func sampleSegments(rs *rateState, prog *segProgress, dt float64) {
+	n := len(prog.completed)
+	if len(rs.segLast) != n || len(rs.segBps) != n {
+		rs.segLast = prog.loadAll()
+		rs.segBps = make([]int64, n)
+		return // re-seeded this tick; a rate needs two observations
+	}
+	for i := 0; i < n; i++ {
+		cur := prog.load(i)
+		rs.segBps[i] = ewma(rs.segBps[i], instRate(cur, rs.segLast[i], dt))
+		rs.segLast[i] = cur
+	}
+}
+
+// instRate is the non-negative instantaneous bytes/sec between two cumulative
+// counts over dt seconds. A counter that fell (a restart from scratch) reports
+// zero rather than a negative rate.
+func instRate(cur, last int64, dt float64) float64 {
+	r := float64(cur-last) / dt
+	if r < 0 {
+		return 0
+	}
+	return r
+}
+
+// ewma folds an instantaneous rate into a running average; the first observation
+// (prev == 0) seeds it.
+func ewma(prev int64, inst float64) int64 {
+	if prev == 0 {
+		return int64(inst)
+	}
+	return int64(rateEWMAAlpha*inst + (1-rateEWMAAlpha)*float64(prev))
 }

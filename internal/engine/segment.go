@@ -68,7 +68,7 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 			break // fully fetched between attempts (or the tail was stolen away)
 		}
 
-		body, err := e.fetcher.RangeGet(ctx, dl.URL, from, end)
+		body, err := e.fetcher.RangeGet(ctx, dl.URL, from, end, requestOptions(dl))
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -167,7 +167,7 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 		}
 		prog.store(0, 0)
 
-		body, err := e.fetcher.Get(ctx, dl.URL)
+		body, err := e.fetcher.Get(ctx, dl.URL, requestOptions(dl))
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

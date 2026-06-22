@@ -23,11 +23,15 @@ var _ Store = stubStore{}
 
 type fetcherStub struct{}
 
-func (fetcherStub) Probe(context.Context, string) (ProbeInfo, error) { return ProbeInfo{}, nil }
-func (fetcherStub) RangeGet(context.Context, string, int64, int64) (io.ReadCloser, error) {
+func (fetcherStub) Probe(context.Context, string, RequestOptions) (ProbeInfo, error) {
+	return ProbeInfo{}, nil
+}
+func (fetcherStub) RangeGet(context.Context, string, int64, int64, RequestOptions) (io.ReadCloser, error) {
 	return nil, nil
 }
-func (fetcherStub) Get(context.Context, string) (io.ReadCloser, error) { return nil, nil }
+func (fetcherStub) Get(context.Context, string, RequestOptions) (io.ReadCloser, error) {
+	return nil, nil
+}
 
 var _ Fetcher = fetcherStub{}
 
