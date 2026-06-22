@@ -11,7 +11,7 @@ import (
 )
 
 func TestPlannedDest(t *testing.T) {
-	e := &Engine{downloadDir: "/downloads"}
+	e := engineWithDir("/downloads")
 	const url = "https://example.com/files/archive.tar.gz"
 
 	tests := []struct {
@@ -60,9 +60,10 @@ func TestClampSegments(t *testing.T) {
 }
 
 func TestSegmentsFor(t *testing.T) {
-	e := &Engine{cfg: config.Download{SegmentsPerDownload: 4}}
+	e := &Engine{}
+	e.defaultSegments.Store(4) // the default now lives in the runtime atomic, seeded by New
 	if got := e.segmentsFor(&Download{}); got != 4 {
-		t.Errorf("segmentsFor(default) = %d, want 4 (config default)", got)
+		t.Errorf("segmentsFor(default) = %d, want 4 (runtime default)", got)
 	}
 	if got := e.segmentsFor(&Download{SegmentCount: 12}); got != 12 {
 		t.Errorf("segmentsFor(override) = %d, want 12", got)

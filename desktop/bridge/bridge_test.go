@@ -107,6 +107,65 @@ func TestBridgeSetPriority(t *testing.T) {
 	}
 }
 
+func TestBridgeSetRate(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.OKResponse()
+	})
+	if err := b.SetRate("d1", 1<<20); err != nil {
+		t.Fatalf("SetRate: %v", err)
+	}
+	got := <-reqs
+	if got.Op != api.OpSetRate || got.SetRate == nil || got.SetRate.ID != "d1" || got.SetRate.MaxRate != 1<<20 {
+		t.Errorf("forwarded set-rate = %+v (op %q), want {d1 1MiB}", got.SetRate, got.Op)
+	}
+}
+
+func TestBridgeGetConfig(t *testing.T) {
+	want := api.ConfigView{
+		DownloadDir:         "/srv/dl",
+		SegmentsPerDownload: 8,
+		DefaultPriority:     api.PriorityHigh,
+		MaxRate:             1 << 20,
+		PerDownloadMaxRate:  512 << 10,
+	}
+	b := newBridge(t, func(r api.Request) api.Response {
+		if r.Op != api.OpGetConfig {
+			t.Errorf("op = %q, want get-config", r.Op)
+		}
+		return api.ConfigResponse(want)
+	})
+	got, err := b.GetConfig()
+	if err != nil || got != want {
+		t.Fatalf("GetConfig = (%+v, %v), want %+v", got, err, want)
+	}
+}
+
+func TestBridgeSetConfig(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	echoed := api.ConfigView{DownloadDir: "/new", SegmentsPerDownload: 6, DefaultPriority: api.PriorityNormal, MaxRate: 2 << 20}
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.ConfigResponse(echoed)
+	})
+	got, err := b.SetConfig("/new", 6, api.PriorityNormal, 2<<20, 0)
+	if err != nil || got != echoed {
+		t.Fatalf("SetConfig = (%+v, %v), want %+v", got, err, echoed)
+	}
+	req := <-reqs
+	if req.Op != api.OpSetConfig || req.SetConfig == nil {
+		t.Fatalf("op = %q, set_config = %+v", req.Op, req.SetConfig)
+	}
+	sc := req.SetConfig
+	// The desktop sends a fully-populated form: every field is a non-nil pointer.
+	if sc.DownloadDir == nil || *sc.DownloadDir != "/new" || sc.SegmentsPerDownload == nil || *sc.SegmentsPerDownload != 6 ||
+		sc.DefaultPriority == nil || *sc.DefaultPriority != api.PriorityNormal ||
+		sc.MaxRate == nil || *sc.MaxRate != 2<<20 || sc.PerDownloadMaxRate == nil || *sc.PerDownloadMaxRate != 0 {
+		t.Errorf("forwarded set-config = %+v, want all fields populated", sc)
+	}
+}
+
 func TestBridgeListAndSnapshot(t *testing.T) {
 	views := []api.DownloadView{{ID: "d1", Status: api.StatusActive, TotalSize: 100, Downloaded: 40, SpeedBps: 10, EtaSecs: 6}}
 	b := newBridge(t, func(api.Request) api.Response { return api.ListResponse(views) })

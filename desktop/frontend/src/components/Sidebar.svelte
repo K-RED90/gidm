@@ -51,13 +51,6 @@
         <span class="count">{n}</span>
       </button>
     {/each}
-
-    <p class="section">Queues</p>
-    <div class="soon">
-      <Icon name="layers" size={15} />
-      <span class="label">Scheduler & queues</span>
-      <span class="tag">Soon</span>
-    </div>
   </nav>
 
 </aside>
@@ -139,28 +132,5 @@
   .item.active .count {
     color: var(--muted);
   }
-
-  .soon {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    color: var(--faint);
-    font-size: var(--text-sm);
-  }
-  .soon .label {
-    flex: 1;
-  }
-  .tag {
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--faint);
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    padding: 1px 6px;
-  }
-
 
 </style>

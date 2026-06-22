@@ -24,9 +24,12 @@ import (
 type memStore struct {
 	mu        sync.Mutex
 	downloads map[string]*Download
+	settings  map[string]string
 }
 
-func newMemStore() *memStore { return &memStore{downloads: map[string]*Download{}} }
+func newMemStore() *memStore {
+	return &memStore{downloads: map[string]*Download{}, settings: map[string]string{}}
+}
 
 func (m *memStore) SaveDownload(_ context.Context, d *Download) error {
 	m.mu.Lock()
@@ -86,9 +89,24 @@ func (m *memStore) UpdateSegment(_ context.Context, id string, seg Segment) erro
 	return nil
 }
 
-func (m *memStore) GetSetting(context.Context, string) (string, error) { return "", ErrNotFound }
-func (m *memStore) SetSetting(context.Context, string, string) error   { return nil }
-func (m *memStore) Close() error                                       { return nil }
+func (m *memStore) GetSetting(_ context.Context, key string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.settings[key]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return v, nil
+}
+
+func (m *memStore) SetSetting(_ context.Context, key, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settings[key] = value
+	return nil
+}
+
+func (m *memStore) Close() error { return nil }
 
 var _ Store = (*memStore)(nil)
 

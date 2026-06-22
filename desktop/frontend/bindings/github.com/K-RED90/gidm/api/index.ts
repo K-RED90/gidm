@@ -7,6 +7,7 @@ export {
 } from "./models.js";
 
 export type {
+    ConfigView,
     DownloadView,
     SegmentView
 } from "./models.js";

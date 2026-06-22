@@ -46,10 +46,10 @@ func renderList(w io.Writer, resp api.Response, asJSON bool) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tPRIORITY\tPROGRESS\tSIZE\tDESTINATION")
+	_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tPRIORITY\tPROGRESS\tSIZE\tLIMIT\tDESTINATION")
 	for _, d := range resp.List.Downloads {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			d.ID, d.Status, d.Priority, progress(d), humanBytes(d.TotalSize), destination(d))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			d.ID, d.Status, d.Priority, progress(d), humanBytes(d.TotalSize), rateLimit(d), destination(d))
 	}
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("render: flush table: %w", err)
@@ -71,6 +71,7 @@ func renderStatus(w io.Writer, resp api.Response, asJSON bool) error {
 	_, _ = fmt.Fprintf(tw, "Priority:\t%s\n", d.Priority)
 	_, _ = fmt.Fprintf(tw, "Progress:\t%s\n", progress(d))
 	_, _ = fmt.Fprintf(tw, "Size:\t%s\n", humanBytes(d.TotalSize))
+	_, _ = fmt.Fprintf(tw, "Rate limit:\t%s\n", rateLimit(d))
 	_, _ = fmt.Fprintf(tw, "Destination:\t%s\n", destination(d))
 	if err := tw.Flush(); err != nil {
 		return fmt.Errorf("render: flush status: %w", err)
@@ -89,6 +90,49 @@ func renderAck(w io.Writer, resp api.Response, word, id string, asJSON bool) err
 		return fmt.Errorf("render: write ack: %w", err)
 	}
 	return nil
+}
+
+// renderConfig prints the daemon's runtime settings (human) or the ConfigResult
+// (json). Shared by `config get` and `config set`, which echoes the result.
+func renderConfig(w io.Writer, resp api.Response, asJSON bool) error {
+	if asJSON {
+		return writeJSON(w, resp.Config)
+	}
+	c := resp.Config.Config
+	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	_, _ = fmt.Fprintf(tw, "Download dir:\t%s\n", dashIfEmpty(c.DownloadDir))
+	_, _ = fmt.Fprintf(tw, "Segments/download:\t%d\n", c.SegmentsPerDownload)
+	_, _ = fmt.Fprintf(tw, "Default priority:\t%s\n", c.DefaultPriority)
+	_, _ = fmt.Fprintf(tw, "Global speed cap:\t%s\n", humanRate(c.MaxRate))
+	_, _ = fmt.Fprintf(tw, "Per-download cap:\t%s\n", humanRate(c.PerDownloadMaxRate))
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("render: flush config: %w", err)
+	}
+	return nil
+}
+
+// rateLimit renders a download's per-record cap, or "-" when uncapped (inheriting
+// the daemon default).
+func rateLimit(d api.DownloadView) string {
+	if d.MaxRate <= 0 {
+		return "-"
+	}
+	return humanBytes(int64(d.MaxRate)) + "/s"
+}
+
+// humanRate formats a bytes/sec setting; 0 (or negative) renders as "unlimited".
+func humanRate(bps int) string {
+	if bps <= 0 {
+		return "unlimited"
+	}
+	return humanBytes(int64(bps)) + "/s"
+}
+
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // progress renders downloaded/total plus a percentage, guarding TotalSize == 0

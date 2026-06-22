@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,7 +37,7 @@ const checkpointWriteTimeout = 5 * time.Second
 // which rules out a steal that was tentatively shrunk then undone; an undone steal
 // restores the End and the loop re-fetches the remainder. coord is nil for the
 // static and whole-body paths, where the segment's bounds are the immutable record.
-func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord, limiter *rateLimiter) error {
+func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord, limiter *atomic.Pointer[rateLimiter]) error {
 	var plan *livePlan
 	if coord != nil {
 		plan = coord.plan
@@ -142,7 +143,7 @@ func isDone(seg Segment, completed int64) bool {
 // Without an End there is no resume; a mid-stream failure restarts from 0 within
 // the retry budget. prog index 0 tracks bytes written so the terminal persist
 // reflects real progress.
-func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
+func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *atomic.Pointer[rateLimiter]) error {
 	bufp := e.bufPool.Get().(*[]byte)
 	defer e.bufPool.Put(bufp)
 	buf := *bufp
@@ -206,14 +207,14 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 // ranged segment, or 0 for the whole-body fallback. plan/segStart are the
 // work-stealing handles (nil/0 on the static and whole-body paths). The copy runs
 // in copySegment so the zero-alloc benchmark covers the exact hot-path call.
-func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte, limiter *rateLimiter) error {
+func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte, limiter *atomic.Pointer[rateLimiter]) error {
 	startCompleted := prog.load(idx)
 
 	tracked := &progressWriter{
 		dst:           &offsetWriter{f: part, off: baseOff},
 		ctx:           ctx,
 		limiter:       limiter,
-		globalLimiter: e.globalLimiter,
+		globalLimiter: &e.globalLimiter,
 		prog:          prog,
 		segs:          dl.Segments,
 		plan:          plan,
@@ -240,10 +241,13 @@ type progressWriter struct {
 	ctx context.Context
 
 	// limiter (per-download) and globalLimiter (engine-wide) throttle each flush at
-	// the buffer boundary. Either or both may be nil (no cap), in which case Write
-	// takes the un-throttled code path with no lock and no allocation.
-	limiter       *rateLimiter
-	globalLimiter *rateLimiter
+	// the buffer boundary. Each is an atomic pointer the daemon can swap live, so a
+	// rate change throttles an in-flight transfer at once; Write loads each once per
+	// flush. A loaded nil (or a nil holder) means "no cap": the uncapped path takes
+	// the un-throttled code path with no lock and no allocation. A nil holder also
+	// supports tests that construct a progressWriter without a limiter.
+	limiter       *atomic.Pointer[rateLimiter]
+	globalLimiter *atomic.Pointer[rateLimiter]
 
 	prog       *segProgress
 	segs       []Segment // durable shape, used only when plan == nil
@@ -260,21 +264,28 @@ type progressWriter struct {
 func (p *progressWriter) Write(b []byte) (int, error) {
 	// Bandwidth admission at the flush boundary (off the per-byte path): gate len(b),
 	// the bytes pulled off the wire this flush, through the per-download then the
-	// global bucket. The combined nil-check keeps the uncapped path byte-for-byte the
-	// un-throttled code — no lock, no alloc. WaitN honors ctx, so a paused/cancelled
-	// transfer aborts here instead of holding tokens. On a steal-clip below we admit
-	// len(b) but write only room; the over-count is bounded by one buffer per (rare)
-	// steal and is not refunded — the bytes were already read from the body.
-	if p.limiter != nil || p.globalLimiter != nil {
-		if p.limiter != nil {
-			if err := p.limiter.WaitN(p.ctx, len(b)); err != nil {
-				return 0, err
-			}
+	// global bucket. Each limiter is loaded once per flush so a live rate change is
+	// honored immediately; an atomic load of nil keeps the uncapped path lock-free
+	// and allocation-free (proved by the -benchmem progressWriter benchmarks). WaitN
+	// honors ctx, so a paused/cancelled transfer aborts here instead of holding
+	// tokens. On a steal-clip below we admit len(b) but write only room; the
+	// over-count is bounded by one buffer per (rare) steal and is not refunded — the
+	// bytes were already read from the body.
+	var perDL, global *rateLimiter
+	if p.limiter != nil {
+		perDL = p.limiter.Load()
+	}
+	if p.globalLimiter != nil {
+		global = p.globalLimiter.Load()
+	}
+	if perDL != nil {
+		if err := perDL.WaitN(p.ctx, len(b)); err != nil {
+			return 0, err
 		}
-		if p.globalLimiter != nil {
-			if err := p.globalLimiter.WaitN(p.ctx, len(b)); err != nil {
-				return 0, err
-			}
+	}
+	if global != nil {
+		if err := global.WaitN(p.ctx, len(b)); err != nil {
+			return 0, err
 		}
 	}
 

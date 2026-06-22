@@ -17,6 +17,12 @@ export function humanSpeed(bps: number): string {
   return bps > 0 ? `${humanSize(bps)}/s` : '—'
 }
 
+// capLabel renders a per-download speed cap for the row badge ("≤ 2 MB/s"), or ''
+// when the download is uncapped (max_rate 0).
+export function capLabel(bps: number): string {
+  return bps > 0 ? `≤ ${humanSize(bps)}/s` : ''
+}
+
 // percent returns 0..100, or null when the total is unknown — the UI shows "—"
 // rather than a misleading 0% (mirrors the CLI's render.go).
 export function percent(d: DownloadView): number | null {

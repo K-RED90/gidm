@@ -27,7 +27,7 @@ func (s *Store) SaveDownload(ctx context.Context, d *engine.Download) error {
 	_, err = tx.ExecContext(ctx, upsertDownload,
 		d.ID, d.URL, d.Destination, d.TotalSize, string(d.Status),
 		d.ETag, d.LastModified, d.Checksum,
-		formatTime(d.CreatedAt), formatTime(d.UpdatedAt), int(d.Priority), d.SegmentCount,
+		formatTime(d.CreatedAt), formatTime(d.UpdatedAt), int(d.Priority), d.SegmentCount, d.MaxRate,
 	)
 	if err != nil {
 		return fmt.Errorf("sqlite: save download %q: %w", d.ID, err)
@@ -116,7 +116,7 @@ func scanDownload(sc rowScanner) (*engine.Download, error) {
 		priority             int
 	)
 	err := sc.Scan(&d.ID, &d.URL, &d.Destination, &d.TotalSize, &status,
-		&d.ETag, &d.LastModified, &d.Checksum, &createdAt, &updatedAt, &priority, &d.SegmentCount)
+		&d.ETag, &d.LastModified, &d.Checksum, &createdAt, &updatedAt, &priority, &d.SegmentCount, &d.MaxRate)
 	if err != nil {
 		return nil, err
 	}
@@ -134,8 +134,8 @@ func scanDownload(sc rowScanner) (*engine.Download, error) {
 
 const upsertDownload = `
 INSERT INTO downloads
-	(id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	(id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	url           = excluded.url,
 	destination   = excluded.destination,
@@ -146,14 +146,15 @@ ON CONFLICT(id) DO UPDATE SET
 	checksum      = excluded.checksum,
 	updated_at    = excluded.updated_at,
 	priority      = excluded.priority,
-	segment_count = excluded.segment_count;`
+	segment_count = excluded.segment_count,
+	max_rate      = excluded.max_rate;`
 
 const selectDownload = `
-SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count
+SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate
 FROM downloads WHERE id = ?;`
 
 const selectDownloads = `
-SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count
+SELECT id, url, destination, total_size, status, etag, last_modified, checksum, created_at, updated_at, priority, segment_count, max_rate
 FROM downloads ORDER BY created_at, id;`
 
 const deleteDownload = `DELETE FROM downloads WHERE id = ?;`

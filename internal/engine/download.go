@@ -83,6 +83,12 @@ type Download struct {
 	// range support / unknown size) ignores it.
 	SegmentCount int
 
+	// MaxRate is a per-download bandwidth cap in bytes/sec. Zero means "inherit the
+	// engine-wide PerDownloadMaxRate default"; a positive value caps this download
+	// alone. It is persisted, so a pause/resume or a daemon restart keeps the cap,
+	// and applied live mid-transfer when changed via Manager.SetRate.
+	MaxRate int
+
 	Segments []Segment
 
 	CreatedAt time.Time

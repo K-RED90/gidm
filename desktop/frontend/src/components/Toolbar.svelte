@@ -5,7 +5,7 @@
   import { menu } from '../lib/menu.svelte'
   import { priorityMenuItems } from '../lib/actions'
 
-  let { onAdd }: { onAdd: () => void } = $props()
+  let { onAdd, onSettings }: { onAdd: () => void; onSettings: () => void } = $props()
 
   const SORTS: { label: string; key: SortKey; dir: SortDir }[] = [
     { label: 'Newest first', key: 'added', dir: 'desc' },
@@ -144,6 +144,16 @@
       </div>
     {/if}
   </div>
+
+  <button
+    class="ghost gear"
+    style="--wails-draggable: no-drag"
+    onclick={onSettings}
+    title="Settings"
+    aria-label="Settings"
+  >
+    <Icon name="settings" size={16} />
+  </button>
   {/if}
 </header>
 
@@ -250,6 +260,12 @@
   .ghost:hover:not(:disabled) {
     background: var(--surface-2);
     color: var(--text);
+  }
+  /* Icon-only settings button: a clean square, no label. */
+  .gear {
+    width: 30px;
+    justify-content: center;
+    padding: 0;
   }
 
   button:disabled {

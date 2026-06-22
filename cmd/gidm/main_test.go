@@ -74,7 +74,7 @@ func newHarness(t *testing.T) *testHarness {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := shortSocketPath(t)
-	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -146,7 +146,7 @@ func newSlowHarness(t *testing.T) *testHarness {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := shortSocketPath(t)
-	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
