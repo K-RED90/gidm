@@ -181,12 +181,14 @@
   }
   .card {
     pointer-events: auto;
-    width: min(560px, 100%);
+    width: min(600px, 100%);
     max-height: calc(100vh - 2 * var(--space-5));
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
+    background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-overlay);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.85);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -201,7 +203,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
-    padding: var(--space-4) var(--space-5);
+    padding: 20px 24px 12px;
     min-width: 0;
   }
   .title {
@@ -231,13 +233,13 @@
   .x {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     flex: none;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--muted);
+    color: var(--faint);
     cursor: pointer;
   }
   .x:hover {
@@ -249,12 +251,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: 0 var(--space-5) var(--space-4);
+    padding: 0 24px 24px;
     overflow-y: auto;
   }
 
   .overall .bar {
-    height: 6px;
+    height: 8px;
     border-radius: 999px;
     background: var(--track);
     overflow: hidden;
@@ -296,14 +298,17 @@
   .props {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--space-2) var(--space-4);
+    gap: 6px;
     margin: 0;
   }
   .props > div {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     min-width: 0;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-radius: 8px;
   }
   .props .wide {
     grid-column: 1 / -1;
@@ -311,8 +316,6 @@
   dt {
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--faint);
   }
   dd {
@@ -367,8 +370,6 @@
     align-items: baseline;
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--faint);
   }
   .conns-head .muted {
@@ -447,9 +448,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-4) var(--space-5);
-    border-top: 1px solid var(--border);
-    background: var(--bg);
+    padding: 12px 24px 20px;
   }
   .foot .spacer {
     flex: 1;
@@ -458,21 +457,21 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border: 0;
     font: inherit;
     font-weight: 600;
     font-size: var(--text-sm);
-    padding: var(--space-2) var(--space-3);
     cursor: pointer;
   }
   .ghost {
     background: transparent;
-    border-color: var(--border-strong);
-    color: var(--text);
+    color: var(--muted);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
   }
   .ghost:hover {
     background: var(--surface-2);
+    color: var(--text);
   }
   .ghost :global(svg) {
     color: var(--muted);
@@ -480,6 +479,9 @@
   .primary {
     background: var(--accent);
     color: var(--accent-contrast);
+    border-radius: 999px;
+    padding: 0 var(--space-4);
+    height: 34px;
   }
   .primary:hover {
     background: var(--accent-hover);

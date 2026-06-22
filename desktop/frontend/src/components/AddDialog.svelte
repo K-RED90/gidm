@@ -266,11 +266,13 @@
 
   .card {
     pointer-events: auto;
-    width: min(480px, 100%);
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
+    width: min(520px, 100%);
+    background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-overlay);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.85);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -285,24 +287,24 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--space-4) var(--space-5);
+    padding: 20px 24px 12px;
   }
   .head h2 {
     margin: 0;
     font-family: var(--font-serif);
-    font-size: var(--text-xl);
+    font-size: var(--text-lg);
     font-weight: 600;
     letter-spacing: -0.01em;
   }
   .x {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     border: 0;
     border-radius: var(--radius-sm);
     background: transparent;
-    color: var(--muted);
+    color: var(--faint);
     cursor: pointer;
   }
   .x:hover {
@@ -314,7 +316,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: 0 var(--space-5) var(--space-5);
+    padding: 0 24px 24px;
   }
 
   .field {
@@ -326,18 +328,16 @@
   .flabel {
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--muted);
   }
 
   .input {
     width: 100%;
     min-width: 0;
-    height: 38px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
+    height: 36px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--surface-2);
     color: var(--text);
     font: inherit;
     font-size: var(--text-md);
@@ -379,9 +379,9 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    height: 38px;
+    height: 36px;
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
+    border-radius: 8px;
     background: var(--surface-2);
     color: var(--text);
     font: inherit;
@@ -419,11 +419,11 @@
   .stepper {
     display: inline-flex;
     align-items: center;
-    height: 38px;
+    height: 36px;
     width: fit-content;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--surface-2);
     overflow: hidden;
   }
   .stepper button {
@@ -444,12 +444,12 @@
     cursor: default;
   }
   .stepper-val {
-    min-width: 54px;
+    min-width: 44px;
     text-align: center;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     font-size: var(--text-sm);
-    border-inline: 1px solid var(--border);
+    border-inline: 1px solid var(--border-strong);
     align-self: stretch;
     display: grid;
     place-items: center;
@@ -461,31 +461,32 @@
 
   .segmented {
     display: flex;
-    height: 38px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
+    height: 36px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--surface-2);
     padding: 3px;
-    gap: 3px;
+    gap: 2px;
   }
   .segmented button {
     flex: 1;
     border: 0;
-    border-radius: 4px;
+    border-radius: 999px;
     background: transparent;
     color: var(--muted);
     font: inherit;
     font-size: var(--text-sm);
     font-weight: 550;
     cursor: pointer;
+    transition: background 0.12s, color 0.12s;
   }
   .segmented button:hover {
     color: var(--text);
   }
   .segmented button.selected {
     background: var(--surface-3);
-    color: var(--accent);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   }
 
   .error {
@@ -497,31 +498,35 @@
   .foot {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
     gap: var(--space-2);
-    padding: var(--space-4) var(--space-5);
-    border-top: 1px solid var(--border);
-    background: var(--bg);
+    padding: 12px 24px 20px;
   }
   .foot button {
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    border: 0;
     font: inherit;
     font-weight: 600;
     font-size: var(--text-sm);
-    padding: var(--space-2) var(--space-4);
     cursor: pointer;
   }
   .ghost {
     background: transparent;
-    border-color: var(--border-strong);
-    color: var(--text);
+    color: var(--muted);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
   }
   .ghost:hover {
     background: var(--surface-2);
+    color: var(--text);
   }
   .primary {
     background: var(--accent);
     color: var(--accent-contrast);
+    border-radius: 999px;
+    padding: 0 var(--space-4);
+    height: 34px;
   }
   .primary:hover:not(:disabled) {
     background: var(--accent-hover);

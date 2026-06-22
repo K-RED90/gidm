@@ -407,8 +407,6 @@
     font-weight: 600;
     color: var(--faint);
     font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     padding: var(--space-2) var(--space-3);
     background: var(--bg);
     border-bottom: 1px solid var(--border);
@@ -420,7 +418,7 @@
   tbody td {
     height: var(--row-h);
     padding: 0 var(--space-3);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
     vertical-align: middle;
     white-space: nowrap;
     overflow: hidden;
@@ -535,7 +533,7 @@
   .bar {
     flex: 1;
     min-width: 0;
-    height: 4px;
+    height: 5px;
     border-radius: 999px;
     background: var(--track);
     overflow: hidden;
@@ -565,7 +563,7 @@
     min-width: 0;
     display: flex;
     gap: 1px;
-    height: 4px;
+    height: 5px;
   }
   .seg {
     flex-basis: 0;
@@ -614,33 +612,37 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    border: 1px solid transparent;
+    border: 1px solid color-mix(in srgb, var(--border-strong) 60%, transparent);
     border-radius: 999px;
-    padding: 2px var(--space-2);
+    padding: 2px 8px;
     font-family: inherit;
     font-size: var(--text-xs);
     font-weight: 600;
-    line-height: 1.4;
-    color: var(--muted);
+    color: var(--faint);
     background: transparent;
     cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
   }
   .prio::before {
-    content: '–';
-    font-weight: 700;
-    color: var(--faint);
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: var(--faint);
+    flex-shrink: 0;
   }
-  .prio.high::before {
-    content: '▲';
-    font-size: 8px;
-    color: var(--accent);
+  .prio.normal {
+    color: var(--muted);
   }
-  .prio.low::before {
-    content: '▼';
-    font-size: 8px;
+  .prio.normal::before {
+    background: var(--border-strong);
   }
   .prio.high {
-    color: var(--text);
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .prio.high::before {
+    background: var(--accent);
   }
   .prio:hover {
     background: var(--surface-2);
@@ -651,31 +653,33 @@
     outline-offset: 1px;
   }
 
+  .dot { display: none; }
+
   .status {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    color: var(--muted);
-    font-weight: 500;
-  }
-  .dot {
-    flex: none;
-    width: 6px;
-    height: 6px;
+    padding: 2px 9px;
     border-radius: 999px;
-    background: var(--faint);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    background: var(--surface-2);
+    color: var(--muted);
   }
-  .dot.active {
-    background: var(--accent);
+  .status:has(.dot.active) {
+    background: color-mix(in srgb, var(--accent) 13%, transparent);
+    color: var(--accent);
   }
-  .dot.completed {
-    background: var(--success);
+  .status:has(.dot.completed) {
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
   }
-  .dot.failed {
-    background: var(--danger);
+  .status:has(.dot.failed) {
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
   }
-  .dot.paused {
-    background: var(--warning);
+  .status:has(.dot.paused) {
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    color: var(--warning);
   }
 
   .actions {
@@ -722,8 +726,6 @@
     justify-content: center;
     gap: var(--space-2);
     color: var(--muted);
-    background-image: var(--grid);
-    background-size: var(--grid-size);
   }
   .empty-title {
     margin: 0;

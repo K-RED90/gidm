@@ -54,8 +54,8 @@
       <DaemonBanner />
     {/if}
     <DownloadsTable onDetails={openDetails} />
+    <StatusBar />
   </main>
-  <StatusBar />
 </div>
 
 <AddDialog open={addOpen} onClose={closeAdd} />
@@ -68,11 +68,10 @@
   .app {
     display: grid;
     grid-template-columns: var(--sidebar-w) 1fr;
-    grid-template-rows: var(--toolbar-h) 1fr var(--statusbar-h);
+    grid-template-rows: var(--toolbar-h) 1fr;
     grid-template-areas:
       'toolbar toolbar'
-      'sidebar main'
-      'statusbar statusbar';
+      'sidebar main';
     height: 100vh;
     overflow: hidden;
   }
@@ -82,6 +81,8 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
-    background: var(--bg);
+    background-color: var(--bg);
+    background-image: var(--grid);
+    background-size: var(--grid-size);
   }
 </style>
