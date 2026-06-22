@@ -66,9 +66,15 @@ func (e *Engine) Run(ctx context.Context, dl *Download) (*Download, error) {
 		fetchURL = dl.URL
 	}
 
-	dest := e.destPath(probe, fetchURL)
-	if err := os.MkdirAll(e.downloadDir, 0o755); err != nil {
-		return nil, fmt.Errorf("engine: create download dir %q: %w", e.downloadDir, err)
+	// Honor a caller-resolved destination (set by Submit from add options);
+	// otherwise derive it from the probe, which can use the server-suggested name.
+	dest := dl.Destination
+	if dest == "" {
+		dest = e.destPath(probe, fetchURL)
+	}
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("engine: create download dir %q: %w", dir, err)
 	}
 
 	fresh := e.resolveRecord(dl, fetchURL, dest, probe)
@@ -95,7 +101,7 @@ func (e *Engine) resolveRecord(dl *Download, fetchURL, dest string, probe ProbeI
 		dl.TotalSize = probe.Size
 		dl.ETag = probe.ETag
 		dl.LastModified = probe.LastModified
-		dl.Segments = e.planFor(probe)
+		dl.Segments = e.planFor(e.segmentsFor(dl), probe)
 		return true
 	}
 
@@ -103,7 +109,7 @@ func (e *Engine) resolveRecord(dl *Download, fetchURL, dest string, probe ProbeI
 		dl.TotalSize = probe.Size
 		dl.ETag = probe.ETag
 		dl.LastModified = probe.LastModified
-		dl.Segments = e.planFor(probe)
+		dl.Segments = e.planFor(e.segmentsFor(dl), probe)
 		return true
 	}
 
@@ -202,7 +208,7 @@ func (e *Engine) prepareDownload(ctx context.Context, url, fetchURL, dest string
 		Status:       StatusActive,
 		ETag:         probe.ETag,
 		LastModified: probe.LastModified,
-		Segments:     e.planFor(probe),
+		Segments:     e.planFor(e.cfg.SegmentsPerDownload, probe),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -373,7 +379,7 @@ func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, pro
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	sem := make(chan struct{}, segLimit(e.cfg.SegmentsPerDownload))
+	sem := make(chan struct{}, segLimit(e.segmentsFor(dl)))
 
 	var (
 		wg    sync.WaitGroup
@@ -453,7 +459,7 @@ func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, p
 		})
 	}
 
-	for w := 0; w < segLimit(e.cfg.SegmentsPerDownload); w++ {
+	for w := 0; w < segLimit(e.segmentsFor(dl)); w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -592,14 +598,15 @@ func cloneForPersist(dl *Download, prog *segProgress) *Download {
 }
 
 // planFor chooses the segment layout for a probe. When the server supports
-// ranges and discloses a size, it splits into SegmentsPerDownload ranged
-// segments; otherwise it returns one open-ended segment (End == -1) that the
-// whole-body Get path streams sequentially, since ranged GETs are unusable.
-func (e *Engine) planFor(probe ProbeInfo) []Segment {
+// ranges and discloses a size, it splits into segments ranged pieces (the
+// per-download override or the configured default, resolved by the caller);
+// otherwise it returns one open-ended segment (End == -1) that the whole-body
+// Get path streams sequentially, since ranged GETs are unusable.
+func (e *Engine) planFor(segments int, probe ProbeInfo) []Segment {
 	if !probe.SupportsRanges || probe.Size <= 0 {
 		return []Segment{{Index: 0, Start: 0, End: -1}}
 	}
-	return planSegments(probe.Size, e.cfg.SegmentsPerDownload)
+	return planSegments(probe.Size, segments)
 }
 
 // openPart opens (and, when fresh and sized, truncates) the .part file. For a

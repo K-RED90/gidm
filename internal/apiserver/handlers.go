@@ -29,7 +29,11 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		if err := api.ValidateAdd(*req.Add); err != nil {
 			return s.toResponse(err), verb, ""
 		}
-		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.defaultPriority))
+		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.defaultPriority), engine.AddOptions{
+			Dir:      req.Add.Dir,
+			Filename: req.Add.Filename,
+			Segments: req.Add.Segments,
+		})
 		if err != nil {
 			return s.toResponse(err), verb, ""
 		}
@@ -140,6 +144,10 @@ func (s *Server) toResponse(err error) api.Response {
 		return api.ErrorResponse(api.CodeBadRequest, "id must be non-empty")
 	case errors.Is(err, api.ErrInvalidPriority):
 		return api.ErrorResponse(api.CodeBadRequest, "priority must be low, normal, or high")
+	case errors.Is(err, api.ErrInvalidDestination):
+		return api.ErrorResponse(api.CodeBadRequest, "dir must be an absolute path and filename a single name")
+	case errors.Is(err, api.ErrInvalidSegments):
+		return api.ErrorResponse(api.CodeBadRequest, "segments must be between 0 and 64")
 	default:
 		// ErrManagerClosed and any unanticipated failure fall here: log the detail,
 		// return a generic message.

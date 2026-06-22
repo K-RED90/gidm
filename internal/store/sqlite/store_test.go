@@ -37,6 +37,7 @@ func sampleDownload(id string) *engine.Download {
 		ETag:         `"abc123"`,
 		LastModified: "Wed, 21 Oct 2015 07:28:00 GMT",
 		Checksum:     "sha256:deadbeef",
+		SegmentCount: 4,
 		Segments: []engine.Segment{
 			{Index: 0, Start: 0, End: 999, Completed: 500},
 			{Index: 1, Start: 1000, End: 1999, Completed: 0},
@@ -53,7 +54,7 @@ func assertDownloadEqual(t *testing.T, got, want *engine.Download) {
 	if got.ID != want.ID || got.URL != want.URL || got.Destination != want.Destination ||
 		got.TotalSize != want.TotalSize || got.Status != want.Status || got.ETag != want.ETag ||
 		got.LastModified != want.LastModified || got.Checksum != want.Checksum ||
-		got.Priority != want.Priority {
+		got.Priority != want.Priority || got.SegmentCount != want.SegmentCount {
 		t.Errorf("scalar fields mismatch:\n got=%+v\nwant=%+v", got, want)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) {

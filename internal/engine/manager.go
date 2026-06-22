@@ -188,21 +188,34 @@ func (m *Manager) recover(ctx context.Context) error {
 	return nil
 }
 
+// AddOptions carries the optional per-download overrides a Submit may specify.
+// The zero value (all fields empty/zero) reproduces the bare-URL add: the engine
+// derives the destination from the probe and uses the configured segment count.
+type AddOptions struct {
+	Dir      string // destination directory; "" → configured download dir
+	Filename string // output filename; "" → server-suggested or URL-derived
+	Segments int    // per-download segment count; 0 → configured default
+}
+
 // Submit persists a new queued download at the given priority and enqueues it,
-// returning its ID immediately without blocking on the transfer.
-func (m *Manager) Submit(ctx context.Context, url string, priority Priority) (string, error) {
+// returning its ID immediately without blocking on the transfer. opts supplies
+// optional destination/segment overrides, resolved here so they survive the
+// queue and a worker picks them up from the persisted record.
+func (m *Manager) Submit(ctx context.Context, url string, priority Priority, opts AddOptions) (string, error) {
 	id, err := newID()
 	if err != nil {
 		return "", err
 	}
 	now := time.Now().UTC()
 	dl := &Download{
-		ID:        id,
-		URL:       url,
-		Status:    StatusQueued,
-		Priority:  priority,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           id,
+		URL:          url,
+		Destination:  m.engine.plannedDest(opts.Dir, opts.Filename, url),
+		Status:       StatusQueued,
+		Priority:     priority,
+		SegmentCount: m.engine.clampSegments(opts.Segments),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	if err := m.store.SaveDownload(ctx, dl); err != nil {
 		return "", fmt.Errorf("engine: manager submit %q: %w", url, err)

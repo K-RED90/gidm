@@ -31,7 +31,7 @@ import (
 // the satisfaction assertion lives in the apiserver test, never in package
 // engine, so the engine's import-clean invariant is preserved.
 type Manager interface {
-	Submit(ctx context.Context, url string, priority engine.Priority) (string, error)
+	Submit(ctx context.Context, url string, priority engine.Priority, opts engine.AddOptions) (string, error)
 	List(ctx context.Context) ([]*engine.Download, error)
 	Get(ctx context.Context, id string) (*engine.Download, error)
 	Pause(ctx context.Context, id string) error

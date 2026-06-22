@@ -60,7 +60,7 @@ func TestManagerSubmitRunsInBackground(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
 	start := time.Now()
-	id, err := m.Submit(context.Background(), "https://example.com/bg.bin", PriorityNormal)
+	id, err := m.Submit(context.Background(), "https://example.com/bg.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestManagerListReflectsLifecycle(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
-	id, err := m.Submit(context.Background(), "https://example.com/lc.bin", PriorityNormal)
+	id, err := m.Submit(context.Background(), "https://example.com/lc.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestManagerHonorsMaxConcurrent(t *testing.T) {
 	ids := make([]string, 4)
 	for i := range ids {
 		url := fmt.Sprintf("https://example.com/gate-%d.bin", i)
-		id, err := m.Submit(context.Background(), url, PriorityNormal)
+		id, err := m.Submit(context.Background(), url, PriorityNormal, AddOptions{})
 		if err != nil {
 			t.Fatalf("Submit %d: %v", i, err)
 		}
@@ -267,7 +267,7 @@ func TestManagerPauseKeepsProgressResumeFinishes(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal)
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestManagerCancelStopsAndKeepsPart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
-	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal)
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestManagerShutdownCancelsInFlightNoLeak(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal)
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestManagerShutdownCancelsInFlightNoLeak(t *testing.T) {
 	close(f.release) // unblock any straggler reads
 
 	// API is closed after shutdown.
-	if _, err := m.Submit(context.Background(), "https://example.com/x", PriorityNormal); err == nil {
+	if _, err := m.Submit(context.Background(), "https://example.com/x", PriorityNormal, AddOptions{}); err == nil {
 		t.Error("Submit after Shutdown should fail with ErrManagerClosed")
 	}
 
@@ -572,7 +572,7 @@ func TestManagerConcurrentControlsRace(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			id, err := m.Submit(ctx, fmt.Sprintf("https://example.com/r-%d.bin", i), priorities[i%len(priorities)])
+			id, err := m.Submit(ctx, fmt.Sprintf("https://example.com/r-%d.bin", i), priorities[i%len(priorities)], AddOptions{})
 			if err != nil {
 				return
 			}
@@ -607,14 +607,14 @@ func TestManagerPauseQueuedJobNeverRuns(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
 	// Saturate the single worker with a download that blocks on the gate.
-	busy, err := m.Submit(context.Background(), "https://example.com/busy.bin", PriorityNormal)
+	busy, err := m.Submit(context.Background(), "https://example.com/busy.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit busy: %v", err)
 	}
 	waitStatus(t, m, busy, StatusActive, 3*time.Second)
 
 	// This one cannot be picked up yet (the worker is busy): it stays queued.
-	queued, err := m.Submit(context.Background(), "https://example.com/queued.bin", PriorityNormal)
+	queued, err := m.Submit(context.Background(), "https://example.com/queued.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit queued: %v", err)
 	}
@@ -899,7 +899,7 @@ func TestManagerDispatchesByPriority(t *testing.T) {
 
 	ctx := context.Background()
 	// Saturate the one worker; its body blocks on the gate so the rest stay queued.
-	blocker, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal)
+	blocker, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit blocker: %v", err)
 	}
@@ -919,7 +919,7 @@ func TestManagerDispatchesByPriority(t *testing.T) {
 	}
 	ids := make([]string, len(queued))
 	for i, q := range queued {
-		id, err := m.Submit(ctx, "https://example.com/"+q.name, q.pri)
+		id, err := m.Submit(ctx, "https://example.com/"+q.name, q.pri, AddOptions{})
 		if err != nil {
 			t.Fatalf("Submit %s: %v", q.name, err)
 		}
@@ -950,17 +950,17 @@ func TestManagerSetPriorityReordersQueued(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
 	ctx := context.Background()
-	blocker, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal)
+	blocker, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit blocker: %v", err)
 	}
 	waitStatus(t, m, blocker, StatusActive, 3*time.Second)
 
-	first, err := m.Submit(ctx, "https://example.com/q1.bin", PriorityLow)
+	first, err := m.Submit(ctx, "https://example.com/q1.bin", PriorityLow, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit q1: %v", err)
 	}
-	second, err := m.Submit(ctx, "https://example.com/q2.bin", PriorityLow)
+	second, err := m.Submit(ctx, "https://example.com/q2.bin", PriorityLow, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit q2: %v", err)
 	}
@@ -994,7 +994,7 @@ func TestManagerSetPriorityActiveDoesNotPreempt(t *testing.T) {
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
 	ctx := context.Background()
-	id, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal)
+	id, err := m.Submit(ctx, "https://example.com/blocker.bin", PriorityNormal, AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
