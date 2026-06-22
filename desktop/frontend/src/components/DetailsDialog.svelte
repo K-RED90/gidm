@@ -181,12 +181,12 @@
   }
   .card {
     pointer-events: auto;
-    width: min(560px, 100%);
+    width: min(600px, 100%);
     max-height: calc(100vh - 2 * var(--space-5));
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-overlay);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.8);
     overflow: hidden;
     display: flex;
     flex-direction: column;

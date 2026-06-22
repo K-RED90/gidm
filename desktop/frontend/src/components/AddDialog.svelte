@@ -266,11 +266,11 @@
 
   .card {
     pointer-events: auto;
-    width: min(480px, 100%);
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
+    width: min(520px, 100%);
+    background: var(--surface-2);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-overlay);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.8);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -335,9 +335,9 @@
     width: 100%;
     min-width: 0;
     height: 38px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--bg);
+    background: var(--surface-3);
     color: var(--text);
     font: inherit;
     font-size: var(--text-md);
@@ -423,7 +423,7 @@
     width: fit-content;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg);
+    background: var(--surface-3);
     overflow: hidden;
   }
   .stepper button {
@@ -464,7 +464,7 @@
     height: 38px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--bg);
+    background: var(--surface-3);
     padding: 3px;
     gap: 3px;
   }
@@ -500,7 +500,7 @@
     gap: var(--space-2);
     padding: var(--space-4) var(--space-5);
     border-top: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--surface-3);
   }
   .foot button {
     border: 1px solid transparent;
