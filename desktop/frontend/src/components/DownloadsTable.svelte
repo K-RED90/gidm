@@ -22,7 +22,7 @@
     other: 'file',
   }
 
-  // Clicking a priority pill cycles low → normal → high → low.
+  // Clicking a priority control cycles low → normal → high → low.
   const NEXT_PRIORITY: Record<string, Priority> = {
     [Priority.PriorityLow]: Priority.PriorityNormal,
     [Priority.PriorityNormal]: Priority.PriorityHigh,
@@ -105,10 +105,9 @@
 
   function onRowDblClick(e: MouseEvent, d: DownloadView): void {
     if ((e.target as HTMLElement).closest('button')) return
-    // Double-click always opens File Properties (IDM-style). Opening the file
-    // itself stays available via the context menu and the properties dialog, so a
-    // completed download never launches unexpectedly on a stray double-click.
-    onDetails(d.id)
+    // a finished file opens directly; anything else opens its properties.
+    if (d.status === DownloadStatus.StatusCompleted) void doOpen(d.destination)
+    else onDetails(d.id)
   }
 
   function onRowContextMenu(e: MouseEvent, d: DownloadView): void {
@@ -320,13 +319,16 @@
             <td class="col-speed num">{humanSpeed(d.speed_bps)}</td>
             <td class="col-eta num">{humanEta(d.eta_secs)}</td>
             <td class="col-prio">
-              <button
-                class="prio {d.priority}"
-                title="Priority: {PRIORITY_LABEL[d.priority] ?? d.priority} — click to change"
-                onclick={() => cyclePriority(d)}
-              >
-                {PRIORITY_LABEL[d.priority] ?? d.priority}
-              </button>
+              {#if !selecting}
+                <button
+                  class="prio {d.priority}"
+                  title="Priority: {PRIORITY_LABEL[d.priority] ?? d.priority} — click to change"
+                  aria-label="Priority {PRIORITY_LABEL[d.priority] ?? d.priority}, click to change"
+                  onclick={() => cyclePriority(d)}
+                >
+                  <i></i><i></i><i></i>
+                </button>
+              {/if}
             </td>
             <td class="col-status">
               <span class="status">
@@ -371,43 +373,47 @@
     table-layout: fixed;
     border-collapse: collapse;
     font-size: var(--text-sm);
+    background: var(--bg);
   }
 
   /* Column widths — single source of truth via colgroup; Name has no width and
-     absorbs the remaining space. table-layout:fixed makes header + body align. */
+     absorbs the remaining space. table-layout:fixed makes header + body align.
+     Priority is narrow now that it's a glyph rather than a labelled pill. */
   .c-sel {
     width: 38px;
   }
   .c-size {
-    width: 84px;
-  }
-  .c-progress {
-    width: 196px;
-  }
-  .c-speed {
-    width: 94px;
-  }
-  .c-eta {
-    width: 72px;
-  }
-  .c-prio {
     width: 88px;
   }
+  .c-progress {
+    width: 200px;
+  }
+  .c-speed {
+    width: 96px;
+  }
+  .c-eta {
+    width: 70px;
+  }
+  .c-prio {
+    width: 62px;
+  }
   .c-status {
-    width: 110px;
+    width: 116px;
   }
   .c-actions {
-    width: 100px;
+    width: 96px;
   }
 
+  /* Header — quiet, sentence case, a single hairline. */
   thead th {
     position: sticky;
     top: 0;
     z-index: 1;
     text-align: left;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--faint);
     font-size: var(--text-xs);
+    letter-spacing: 0.02em;
     padding: var(--space-2) var(--space-3);
     background: var(--bg);
     border-bottom: 1px solid var(--border);
@@ -419,7 +425,7 @@
   tbody td {
     height: var(--row-h);
     padding: 0 var(--space-3);
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     vertical-align: middle;
     white-space: nowrap;
     overflow: hidden;
@@ -429,13 +435,14 @@
     cursor: default;
   }
   tbody tr:hover:not(.selected) {
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) 60%, transparent);
   }
+  /* Selection is tied to the accent so it reads as one deliberate state. */
   tbody tr.selected {
-    background: var(--surface-3);
+    background: var(--accent-soft);
   }
   tbody tr.selected:hover {
-    background: color-mix(in srgb, var(--surface-3) 82%, var(--accent-soft));
+    background: color-mix(in srgb, var(--accent-soft) 78%, var(--surface-3));
   }
   /* accent edge on the selected row, drawn on the first cell */
   tbody tr.selected > td.col-sel {
@@ -451,10 +458,13 @@
     text-align: center;
   }
   .cbox {
+    appearance: none;
+    -webkit-appearance: none;
     display: inline-grid;
     place-items: center;
     width: 16px;
     height: 16px;
+    padding: 0;
     border: 1.5px solid var(--border-strong);
     border-radius: 5px;
     background: var(--bg);
@@ -495,7 +505,7 @@
   }
   .ficon {
     flex: none;
-    color: var(--muted);
+    color: var(--faint);
   }
   .fname {
     min-width: 0;
@@ -503,26 +513,31 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Per-download speed-cap badge: a quiet pill next to the name. */
+  /* Per-download speed-cap badge: a small squared mono tag, not a pill. */
   .caplimit {
     flex: none;
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    padding: 1px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    font-size: 10.5px;
-    font-weight: 600;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--font-mono, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace);
+    font-size: 10px;
+    font-weight: 500;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.01em;
-    color: var(--muted);
-    background: var(--surface-2);
+    letter-spacing: -0.01em;
+    color: var(--faint);
+    background: transparent;
   }
 
+  /* Numeric columns set in mono + tabular figures: digits line up column-wise
+     and the table reads like an instrument panel. */
   .num {
     text-align: right;
+    font-family: var(--font-mono, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace);
     font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    letter-spacing: -0.02em;
     color: var(--muted);
   }
 
@@ -534,7 +549,7 @@
   .bar {
     flex: 1;
     min-width: 0;
-    height: 5px;
+    height: 6px;
     border-radius: 999px;
     background: var(--track);
     overflow: hidden;
@@ -549,9 +564,12 @@
   .bar-fill.completed {
     background: var(--success);
   }
-  .bar-fill.paused,
-  .bar-fill.failed {
+  .bar-fill.paused {
     background: var(--faint);
+  }
+  /* a half-done failure shouldn't look identical to a pause */
+  .bar-fill.failed {
+    background: color-mix(in srgb, var(--danger) 72%, var(--faint));
   }
   .bar-fill.indeterminate {
     width: 35%;
@@ -563,8 +581,8 @@
     flex: 1;
     min-width: 0;
     display: flex;
-    gap: 1px;
-    height: 5px;
+    gap: 1.5px;
+    height: 6px;
   }
   .seg {
     flex-basis: 0;
@@ -602,87 +620,114 @@
   }
   .pct {
     flex: none;
-    width: 30px;
+    width: 34px;
     text-align: right;
+    font-family: var(--font-mono, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace);
     font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
     color: var(--faint);
     font-size: var(--text-xs);
   }
 
+  /* Priority as a signal-strength glyph: more bars = higher priority. Lit bars
+     read low/normal in muted, high in accent; click cycles low → normal → high. */
   .prio {
     display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid color-mix(in srgb, var(--border-strong) 60%, transparent);
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-family: inherit;
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--faint);
+    align-items: flex-end;
+    gap: 2px;
+    height: 13px;
+    padding: 3px 4px;
+    border: 0;
     background: transparent;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: background 0.1s, border-color 0.1s;
+    transition: background 0.1s ease;
   }
-  .prio::before {
-    content: '';
-    width: 5px;
+  .prio i {
+    width: 3px;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--faint) 30%, transparent);
+    transition: background 0.12s ease;
+  }
+  .prio i:nth-child(1) {
     height: 5px;
-    border-radius: 999px;
-    background: var(--faint);
-    flex-shrink: 0;
   }
-  .prio.normal {
-    color: var(--muted);
+  .prio i:nth-child(2) {
+    height: 9px;
   }
-  .prio.normal::before {
-    background: var(--border-strong);
+  .prio i:nth-child(3) {
+    height: 13px;
   }
-  .prio.high {
-    color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  .prio.low i:nth-child(-n + 1),
+  .prio.normal i:nth-child(-n + 2) {
+    background: var(--muted);
   }
-  .prio.high::before {
+  .prio.high i {
     background: var(--accent);
   }
   .prio:hover {
     background: var(--surface-2);
-    border-color: var(--border-strong);
   }
   .prio:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
 
-  .dot { display: none; }
-
+  /* Status: a colored dot + quiet label. No tinted pill. Live and failed earn
+     attention (accent text / danger text); done and queued recede. */
   .status {
     display: inline-flex;
     align-items: center;
-    padding: 2px 9px;
-    border-radius: 999px;
+    gap: 7px;
     font-size: var(--text-xs);
-    font-weight: 600;
-    background: var(--surface-2);
+    font-weight: 500;
     color: var(--muted);
   }
-  .status:has(.dot.active) {
-    background: color-mix(in srgb, var(--accent) 13%, transparent);
-    color: var(--accent);
+  .dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--faint);
+    flex: none;
   }
-  .status:has(.dot.completed) {
-    background: color-mix(in srgb, var(--success) 15%, transparent);
-    color: var(--success);
+  .dot.active {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  .dot.completed {
+    background: var(--success);
+  }
+  .dot.failed {
+    background: var(--danger);
+  }
+  .dot.paused {
+    background: var(--warning);
+  }
+  .status:has(.dot.active) {
+    color: var(--text);
   }
   .status:has(.dot.failed) {
-    background: color-mix(in srgb, var(--danger) 15%, transparent);
     color: var(--danger);
   }
-  .status:has(.dot.paused) {
-    background: color-mix(in srgb, var(--warning) 15%, transparent);
-    color: var(--warning);
+  @keyframes pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+    50% {
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 6%, transparent);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot.active {
+      animation: none;
+    }
   }
 
+  /* Row actions: transparent until the row is hovered/focused — no permanent
+     grey chips cluttering the right edge. */
   .actions {
     display: flex;
     gap: var(--space-1);
@@ -698,19 +743,20 @@
     display: grid;
     place-items: center;
     border: 0;
-    background: var(--surface-3);
-    color: var(--muted);
+    background: transparent;
+    color: var(--faint);
     border-radius: var(--radius-sm);
     width: 26px;
     height: 26px;
     cursor: pointer;
+    transition: background 0.1s ease, color 0.1s ease;
   }
   .actions button:hover {
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--surface-3);
+    color: var(--text);
   }
   .actions button.danger:hover {
-    background: color-mix(in srgb, var(--danger) 20%, transparent);
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
     color: var(--danger);
   }
   .actions button:focus-visible {
