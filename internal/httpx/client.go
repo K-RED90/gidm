@@ -81,23 +81,48 @@ func New(netCfg config.Network, dl config.Download, opts ...Option) (*Client, er
 	}
 
 	timeout := dl.Timeout.Duration()
+	dialer := &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: dialKeepAlive,
+	}
+	if netCfg.TCPRecvBuf > 0 || netCfg.TCPSendBuf > 0 {
+		dialer.Control = tcpBufControl(netCfg.TCPRecvBuf, netCfg.TCPSendBuf)
+	}
+
 	transport := &http.Transport{
-		Proxy: proxy,
-		DialContext: (&net.Dialer{
-			Timeout:   timeout,
-			KeepAlive: dialKeepAlive,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          maxIdleConns,
-		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
-		IdleConnTimeout:       idleConnTimeout,
+		Proxy:       proxy,
+		DialContext: dialer.DialContext,
+		// HTTP/2 is opt-in (netCfg.HTTP2): an H2 origin multiplexes every segment
+		// onto one TCP connection, collapsing the parallel ranges into a single
+		// congestion window and the server's per-connection rate limit. The default
+		// (false) forces HTTP/1.1 below so each segment is its own connection.
+		ForceAttemptHTTP2:   netCfg.HTTP2,
+		MaxIdleConns:        maxIdleConns,
+		MaxIdleConnsPerHost: maxIdleConnsPerHost,
+		IdleConnTimeout:     idleConnTimeout,
+		// MaxConnsPerHost is left at 0 (unlimited) on purpose: capping it would
+		// serialize concurrent segments behind a connection limit.
 		TLSHandshakeTimeout:   timeout,
 		ExpectContinueTimeout: expectContinueTimeout,
 		ResponseHeaderTimeout: timeout,
+		// A download manager wants the file's raw bytes: transparent gzip would
+		// burn CPU decompressing and muddy Content-Length/Content-Range range math.
+		DisableCompression: true,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: netCfg.TLSSkipVerify,
 			MinVersion:         tls.VersionTLS12,
 		},
+	}
+	if netCfg.SocketBufferSize > 0 {
+		transport.ReadBufferSize = netCfg.SocketBufferSize
+		transport.WriteBufferSize = netCfg.SocketBufferSize
+	}
+	if !netCfg.HTTP2 {
+		// A non-nil (empty) TLSNextProto disables net/http's automatic HTTP/2
+		// upgrade even on an h2-advertising origin, so segments stay on separate
+		// HTTP/1.1 connections. NextProtos pins the ALPN offer to http/1.1 to match.
+		transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+		transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	}
 
 	c := &Client{
