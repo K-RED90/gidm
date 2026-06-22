@@ -17,6 +17,12 @@ export function humanSpeed(bps: number): string {
   return bps > 0 ? `${humanSize(bps)}/s` : '—'
 }
 
+// capLabel renders a per-download speed cap for the row badge ("≤ 2 MB/s"), or ''
+// when the download is uncapped (max_rate 0).
+export function capLabel(bps: number): string {
+  return bps > 0 ? `≤ ${humanSize(bps)}/s` : ''
+}
+
 // percent returns 0..100, or null when the total is unknown — the UI shows "—"
 // rather than a misleading 0% (mirrors the CLI's render.go).
 export function percent(d: DownloadView): number | null {
@@ -47,4 +53,43 @@ export function fileName(d: DownloadView): string {
     // not a parseable URL — fall through
   }
   return d.url
+}
+
+// fileExt returns the lowercase extension of a download's name (without the dot),
+// or '' when there is none.
+export function fileExt(d: DownloadView): string {
+  const name = fileName(d)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+// FileCategory is the IDM-style content grouping used by the sidebar categories.
+export type FileCategory = 'compressed' | 'documents' | 'music' | 'pictures' | 'programs' | 'video' | 'other'
+
+// EXT_CATEGORY maps a file extension to its category. Extensions not listed fall
+// through to 'other'. One table, kept here so the sidebar and any filter share it.
+const EXT_CATEGORY: Record<string, FileCategory> = {
+  // compressed
+  zip: 'compressed', rar: 'compressed', '7z': 'compressed', gz: 'compressed', tgz: 'compressed',
+  bz2: 'compressed', xz: 'compressed', tar: 'compressed', zst: 'compressed',
+  // documents
+  pdf: 'documents', doc: 'documents', docx: 'documents', xls: 'documents', xlsx: 'documents',
+  ppt: 'documents', pptx: 'documents', txt: 'documents', rtf: 'documents', csv: 'documents',
+  epub: 'documents', mobi: 'documents', odt: 'documents',
+  // music
+  mp3: 'music', flac: 'music', wav: 'music', aac: 'music', ogg: 'music', m4a: 'music', opus: 'music',
+  // pictures
+  jpg: 'pictures', jpeg: 'pictures', png: 'pictures', gif: 'pictures', webp: 'pictures',
+  svg: 'pictures', bmp: 'pictures', tiff: 'pictures', heic: 'pictures', ico: 'pictures',
+  // programs
+  exe: 'programs', msi: 'programs', dmg: 'programs', pkg: 'programs', deb: 'programs',
+  rpm: 'programs', appimage: 'programs', apk: 'programs', bin: 'programs',
+  // video
+  mp4: 'video', mkv: 'video', avi: 'video', mov: 'video', webm: 'video', flv: 'video',
+  wmv: 'video', m4v: 'video', mpg: 'video', mpeg: 'video', ts: 'video',
+}
+
+// categoryOf classifies a download by its file extension.
+export function categoryOf(d: DownloadView): FileCategory {
+  return EXT_CATEGORY[fileExt(d)] ?? 'other'
 }

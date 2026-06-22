@@ -25,7 +25,50 @@ func (e *Engine) destPath(probe ProbeInfo, rawURL string) string {
 	if name == "" {
 		name = baseFromURL(rawURL)
 	}
-	return filepath.Join(e.downloadDir, safeBase(name))
+	return filepath.Join(e.dlDir(), safeBase(name))
+}
+
+// plannedDest resolves a caller-supplied destination at submit time, before any
+// probe exists. It returns "" when neither dir nor filename is overridden, so the
+// engine falls back to its probe-time destPath (which can honor the server's
+// suggested filename). Otherwise the directory defaults to the engine's download
+// dir and the base name to the URL's last element, each overridable; the base is
+// always reduced by safeBase so a caller filename cannot traverse out of dir.
+func (e *Engine) plannedDest(dir, filename, rawURL string) string {
+	if dir == "" && filename == "" {
+		return ""
+	}
+	if dir == "" {
+		dir = e.dlDir()
+	}
+	name := filename
+	if name == "" {
+		name = baseFromURL(rawURL)
+	}
+	return filepath.Join(dir, safeBase(name))
+}
+
+// clampSegments bounds a per-download segment override to what the engine will
+// honor: zero passes through unchanged (meaning "use the configured default"),
+// and any positive value is clamped to [1, MaxSegments] so a caller can neither
+// disable segmentation nor exceed the work-stealing slot ceiling.
+func (e *Engine) clampSegments(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if e.cfg.MaxSegments > 0 && n > e.cfg.MaxSegments {
+		return e.cfg.MaxSegments
+	}
+	return n
+}
+
+// segmentsFor reports the effective segment count for a download: its override
+// when set, otherwise the configured SegmentsPerDownload.
+func (e *Engine) segmentsFor(dl *Download) int {
+	if dl.SegmentCount > 0 {
+		return dl.SegmentCount
+	}
+	return e.defaultSegmentCount()
 }
 
 // safeBase collapses an arbitrary name to a single, separator-free filename that

@@ -46,6 +46,32 @@ type DownloadView struct {
 	SpeedBps    int64  `json:"speed_bps"`
 	EtaSecs     int64  `json:"eta_secs"`
 	Destination string `json:"destination"`
+
+	// The fields below are optional detail, populated for the properties view and
+	// (for Segments) the per-connection progress display. They are omitempty so the
+	// common list payload stays lean and older clients that ignore them are unaffected.
+	Checksum     string `json:"checksum,omitempty"`      // e.g. "sha256:…", empty when none
+	SegmentCount int    `json:"segment_count,omitempty"` // parallel connections planned
+	MaxRate      int    `json:"max_rate,omitempty"`      // per-download cap, bytes/sec; 0 = inherit default
+	CreatedAt    string `json:"created_at,omitempty"`    // RFC3339, empty when zero
+	UpdatedAt    string `json:"updated_at,omitempty"`    // RFC3339, empty when zero
+
+	// Segments carries each connection's byte range and live progress (IDM-style
+	// "download progress by connections"). To keep the polled list lean it is
+	// included only for in-flight downloads there; the status endpoint always
+	// includes it.
+	Segments []SegmentView `json:"segments,omitempty"`
+}
+
+// SegmentView is one parallel connection's byte range and live downloaded count.
+// Completed is the live, in-flight byte total for an active download (the daemon
+// folds the worker counters in before projecting), so a client can show each
+// connection's progress as Completed/(End-Start+1).
+type SegmentView struct {
+	Index     int   `json:"index"`
+	Start     int64 `json:"start"`     // inclusive
+	End       int64 `json:"end"`       // inclusive
+	Completed int64 `json:"completed"` // bytes written within the range
 }
 
 type AddResult struct {
@@ -58,6 +84,22 @@ type ListResult struct {
 
 type StatusResult struct {
 	Download DownloadView `json:"download"`
+}
+
+// ConfigView is the daemon's current runtime-tunable configuration, returned by
+// get-config and echoed by set-config. Rates are bytes/sec; 0 means unlimited.
+// The non-tunable engine internals (buffer size, retries, timeouts, work-stealing)
+// are deliberately not exposed — they stay config-file-only.
+type ConfigView struct {
+	DownloadDir         string   `json:"download_dir"`
+	SegmentsPerDownload int      `json:"segments_per_download"`
+	DefaultPriority     Priority `json:"default_priority"`
+	MaxRate             int      `json:"max_rate"`              // engine-wide cap
+	PerDownloadMaxRate  int      `json:"per_download_max_rate"` // default per-download cap
+}
+
+type ConfigResult struct {
+	Config ConfigView `json:"config"`
 }
 
 // PingResult carries the server's protocol version. Uptime is intentionally

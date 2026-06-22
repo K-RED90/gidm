@@ -107,14 +107,29 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 		fs := flag.NewFlagSet("add", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		priority := fs.String("priority", "", "download priority: low | normal | high (default normal)")
+		dir := fs.String("dir", "", "destination directory (absolute; default: configured download dir)")
+		filename := fs.String("filename", "", "output filename (single name, no path separators)")
+		segments := fs.Int("segments", 0, "number of parallel segments (0 = daemon default)")
 		if err := fs.Parse(rest); err != nil {
 			return exitBadRequest
 		}
 		if fs.NArg() != 1 {
-			_, _ = fmt.Fprintln(stderr, "gidm: add requires exactly one argument: add [--priority low|normal|high] <url>")
+			_, _ = fmt.Fprintln(stderr, "gidm: add requires exactly one argument: add [flags] <url>")
 			return exitBadRequest
 		}
-		return runCommand(c, asJSON, stdout, stderr, api.NewAddRequestWithPriority(fs.Arg(0), api.Priority(*priority)),
+		add := api.Add{
+			URL:      fs.Arg(0),
+			Priority: api.Priority(*priority),
+			Dir:      *dir,
+			Filename: *filename,
+			Segments: *segments,
+		}
+		// Validate client-side for a clear, immediate message; the daemon revalidates.
+		if err := api.ValidateAdd(add); err != nil {
+			_, _ = fmt.Fprintln(stderr, "gidm:", err)
+			return exitBadRequest
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewAddRequestWithOptions(add.URL, add),
 			func(w io.Writer, r api.Response) error { return renderAdd(w, r, asJSON) })
 	case "list":
 		if code := noArgs(stderr, "list", rest); code != exitOK {
@@ -143,6 +158,13 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 		}
 		return runCommand(c, asJSON, stdout, stderr, api.NewResumeRequest(id),
 			func(w io.Writer, r api.Response) error { return renderAck(w, r, "resumed", id, asJSON) })
+	case "restart":
+		id, code := oneArg(stderr, "restart", "<id>", rest)
+		if code != exitOK {
+			return code
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewRestartRequest(id),
+			func(w io.Writer, r api.Response) error { return renderAck(w, r, "restarting", id, asJSON) })
 	case "rm":
 		id, code := oneArg(stderr, "rm", "<id>", rest)
 		if code != exitOK {
@@ -157,8 +179,95 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 		}
 		return runCommand(c, asJSON, stdout, stderr, api.NewSetPriorityRequest(id, api.Priority(level)),
 			func(w io.Writer, r api.Response) error { return renderAck(w, r, "priority set", id, asJSON) })
+	case "set-rate":
+		fs := flag.NewFlagSet("set-rate", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		maxRate := fs.Int("max-rate", 0, "per-download cap in bytes/sec (0 removes the cap)")
+		if err := fs.Parse(rest); err != nil {
+			return exitBadRequest
+		}
+		if fs.NArg() != 1 {
+			_, _ = fmt.Fprintln(stderr, "gidm: set-rate requires exactly one argument: set-rate [--max-rate=N] <id>")
+			return exitBadRequest
+		}
+		id := fs.Arg(0)
+		if err := api.ValidateSetRate(api.SetRate{ID: id, MaxRate: *maxRate}); err != nil {
+			_, _ = fmt.Fprintln(stderr, "gidm:", err)
+			return exitBadRequest
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewSetRateRequest(id, *maxRate),
+			func(w io.Writer, r api.Response) error { return renderAck(w, r, "rate set", id, asJSON) })
+	case "config":
+		return dispatchConfig(rest, c, asJSON, stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "gidm: unknown command %q\n", cmd)
+		return exitBadRequest
+	}
+}
+
+// dispatchConfig handles the `config get` / `config set` subcommands. set builds a
+// partial api.SetConfig from only the flags the user actually passed (via
+// fs.Visit), so an omitted flag leaves that setting unchanged and a 0 rate stays a
+// real value rather than being read as "unset".
+func dispatchConfig(args []string, c *client, asJSON bool, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		_, _ = fmt.Fprintln(stderr, "gidm: config requires a subcommand: config get | config set [flags]")
+		return exitBadRequest
+	}
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "get":
+		if code := noArgs(stderr, "config get", rest); code != exitOK {
+			return code
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewGetConfigRequest(),
+			func(w io.Writer, r api.Response) error { return renderConfig(w, r, asJSON) })
+	case "set":
+		fs := flag.NewFlagSet("config set", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		dir := fs.String("dir", "", "default download directory (absolute)")
+		segments := fs.Int("segments", 0, "default segments per download (1..64)")
+		priority := fs.String("priority", "", "default priority: low | normal | high")
+		maxRate := fs.Int("max-rate", 0, "global bandwidth cap in bytes/sec (0 = unlimited)")
+		perDownloadMaxRate := fs.Int("per-download-max-rate", 0, "default per-download cap in bytes/sec (0 = unlimited)")
+		if err := fs.Parse(rest); err != nil {
+			return exitBadRequest
+		}
+		if fs.NArg() != 0 {
+			_, _ = fmt.Fprintln(stderr, "gidm: config set takes only flags, no positional arguments")
+			return exitBadRequest
+		}
+		set := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+		if len(set) == 0 {
+			_, _ = fmt.Fprintln(stderr, "gidm: config set needs at least one flag (e.g. --max-rate=1048576)")
+			return exitBadRequest
+		}
+		var sc api.SetConfig
+		if set["dir"] {
+			sc.DownloadDir = dir
+		}
+		if set["segments"] {
+			sc.SegmentsPerDownload = segments
+		}
+		if set["priority"] {
+			p := api.Priority(*priority)
+			sc.DefaultPriority = &p
+		}
+		if set["max-rate"] {
+			sc.MaxRate = maxRate
+		}
+		if set["per-download-max-rate"] {
+			sc.PerDownloadMaxRate = perDownloadMaxRate
+		}
+		if err := api.ValidateSetConfig(sc); err != nil {
+			_, _ = fmt.Fprintln(stderr, "gidm:", err)
+			return exitBadRequest
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewSetConfigRequest(sc),
+			func(w io.Writer, r api.Response) error { return renderConfig(w, r, asJSON) })
+	default:
+		_, _ = fmt.Fprintf(stderr, "gidm: unknown config subcommand %q (use get or set)\n", sub)
 		return exitBadRequest
 	}
 }
@@ -268,13 +377,20 @@ func usage(w io.Writer, gf *flag.FlagSet) {
 	_, _ = fmt.Fprintf(w, "gidm %s — Go Internet Download Manager\n\n", version)
 	_, _ = fmt.Fprintln(w, "Usage: gidm [global flags] <command> [args]")
 	_, _ = fmt.Fprintln(w, "\nCommands:")
-	_, _ = fmt.Fprintln(w, "  add [--priority L] <url>   queue a download (L: low|normal|high) and print its id")
+	_, _ = fmt.Fprintln(w, "  add [flags] <url>          queue a download and print its id")
+	_, _ = fmt.Fprintln(w, "      flags: --priority low|normal|high  --dir <abs path>")
+	_, _ = fmt.Fprintln(w, "             --filename <name>  --segments <n>")
 	_, _ = fmt.Fprintln(w, "  list                       list all downloads")
 	_, _ = fmt.Fprintln(w, "  status <id>                show one download (alias: get)")
 	_, _ = fmt.Fprintln(w, "  pause <id>                 pause a download")
 	_, _ = fmt.Fprintln(w, "  resume <id>                resume a paused download")
-	_, _ = fmt.Fprintln(w, "  rm <id>                    cancel and remove a download")
+	_, _ = fmt.Fprintln(w, "  restart <id>               re-download from scratch (discards partial progress)")
+	_, _ = fmt.Fprintln(w, "  rm <id>                    remove a download (deletes it; a completed file is kept)")
 	_, _ = fmt.Fprintln(w, "  set-priority <id> <L>      change priority (L: low|normal|high)")
+	_, _ = fmt.Fprintln(w, "  set-rate [--max-rate=N] <id>  cap one download to N bytes/sec (0 removes)")
+	_, _ = fmt.Fprintln(w, "  config get                 show the daemon's runtime settings")
+	_, _ = fmt.Fprintln(w, "  config set [flags]         change settings (--dir --segments --priority")
+	_, _ = fmt.Fprintln(w, "                             --max-rate --per-download-max-rate)")
 	_, _ = fmt.Fprintln(w, "\nGlobal flags:")
 	gf.PrintDefaults()
 }

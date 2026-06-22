@@ -1,6 +1,8 @@
 package apiserver
 
 import (
+	"time"
+
 	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/engine"
 )
@@ -12,7 +14,12 @@ import (
 // Manager's sampled rate (it folds both into d before this runs). EtaSecs is
 // derived here: remaining bytes over the live rate, or -1 when it cannot be known
 // (no live rate or unknown total).
-func toView(d *engine.Download) api.DownloadView {
+//
+// full controls the per-connection Segments slice: the status endpoint passes
+// true so the properties view always sees the breakdown, while the polled list
+// passes false and includes Segments only for in-flight downloads — keeping the
+// frequent list payload lean while still feeding the table's live segmented bar.
+func toView(d *engine.Download, full bool) api.DownloadView {
 	var downloaded int64
 	for _, seg := range d.Segments {
 		downloaded += seg.Completed
@@ -22,17 +29,82 @@ func toView(d *engine.Download) api.DownloadView {
 		remaining := max(d.TotalSize-downloaded, 0)
 		eta = remaining / d.SpeedBps
 	}
-	return api.DownloadView{
-		ID:          d.ID,
-		URL:         d.URL,
-		Status:      statusToView(d.Status),
-		Priority:    priorityToView(d.Priority),
-		TotalSize:   d.TotalSize,
-		Downloaded:  downloaded,
-		SpeedBps:    d.SpeedBps,
-		EtaSecs:     eta,
-		Destination: d.Destination,
+	v := api.DownloadView{
+		ID:           d.ID,
+		URL:          d.URL,
+		Status:       statusToView(d.Status),
+		Priority:     priorityToView(d.Priority),
+		TotalSize:    d.TotalSize,
+		Downloaded:   downloaded,
+		SpeedBps:     d.SpeedBps,
+		EtaSecs:      eta,
+		Destination:  d.Destination,
+		Checksum:     d.Checksum,
+		SegmentCount: d.SegmentCount,
+		MaxRate:      d.MaxRate,
+		CreatedAt:    formatTime(d.CreatedAt),
+		UpdatedAt:    formatTime(d.UpdatedAt),
 	}
+	if full || d.Status == engine.StatusActive || d.Status == engine.StatusPaused {
+		v.Segments = segmentsToView(d.Segments)
+	}
+	return v
+}
+
+// toConfigView projects the engine's runtime Settings onto the api.ConfigView
+// wire shape (the get-config result and the set-config echo).
+func toConfigView(s engine.Settings) api.ConfigView {
+	return api.ConfigView{
+		DownloadDir:         s.DownloadDir,
+		SegmentsPerDownload: s.SegmentsPerDownload,
+		DefaultPriority:     priorityToView(s.DefaultPriority),
+		MaxRate:             s.MaxRate,
+		PerDownloadMaxRate:  s.PerDownloadMaxRate,
+	}
+}
+
+// applyConfigPatch overlays a set-config request's present (non-nil) fields onto
+// the current settings, leaving the rest unchanged. The result is the full
+// settings to apply and persist — the merge that gives set-config its patch
+// semantics.
+func applyConfigPatch(cur engine.Settings, sc api.SetConfig) engine.Settings {
+	if sc.DownloadDir != nil {
+		cur.DownloadDir = *sc.DownloadDir
+	}
+	if sc.SegmentsPerDownload != nil {
+		cur.SegmentsPerDownload = *sc.SegmentsPerDownload
+	}
+	if sc.DefaultPriority != nil {
+		cur.DefaultPriority = priorityFromView(*sc.DefaultPriority, cur.DefaultPriority)
+	}
+	if sc.MaxRate != nil {
+		cur.MaxRate = *sc.MaxRate
+	}
+	if sc.PerDownloadMaxRate != nil {
+		cur.PerDownloadMaxRate = *sc.PerDownloadMaxRate
+	}
+	return cur
+}
+
+// segmentsToView projects the engine's per-segment progress onto the wire shape.
+func segmentsToView(segs []engine.Segment) []api.SegmentView {
+	if len(segs) == 0 {
+		return nil
+	}
+	out := make([]api.SegmentView, len(segs))
+	for i, s := range segs {
+		out[i] = api.SegmentView{Index: s.Index, Start: s.Start, End: s.End, Completed: s.Completed}
+	}
+	return out
+}
+
+// formatTime renders a timestamp as RFC3339, or "" for the zero value so the
+// field is omitted on the wire.
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 // priorityToView maps an engine.Priority to the api.Priority wire enum; an

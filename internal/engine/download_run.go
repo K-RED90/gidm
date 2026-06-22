@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -34,8 +35,9 @@ func (e *Engine) Download(ctx context.Context, url string) (*Download, error) {
 	}
 
 	dest := e.destPath(probe, fetchURL)
-	if err := os.MkdirAll(e.downloadDir, 0o755); err != nil {
-		return nil, fmt.Errorf("engine: create download dir %q: %w", e.downloadDir, err)
+	dir := e.dlDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("engine: create download dir %q: %w", dir, err)
 	}
 
 	dl, fresh, err := e.prepareDownload(ctx, url, fetchURL, dest, probe)
@@ -66,9 +68,15 @@ func (e *Engine) Run(ctx context.Context, dl *Download) (*Download, error) {
 		fetchURL = dl.URL
 	}
 
-	dest := e.destPath(probe, fetchURL)
-	if err := os.MkdirAll(e.downloadDir, 0o755); err != nil {
-		return nil, fmt.Errorf("engine: create download dir %q: %w", e.downloadDir, err)
+	// Honor a caller-resolved destination (set by Submit from add options);
+	// otherwise derive it from the probe, which can use the server-suggested name.
+	dest := dl.Destination
+	if dest == "" {
+		dest = e.destPath(probe, fetchURL)
+	}
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("engine: create download dir %q: %w", dir, err)
 	}
 
 	fresh := e.resolveRecord(dl, fetchURL, dest, probe)
@@ -95,7 +103,7 @@ func (e *Engine) resolveRecord(dl *Download, fetchURL, dest string, probe ProbeI
 		dl.TotalSize = probe.Size
 		dl.ETag = probe.ETag
 		dl.LastModified = probe.LastModified
-		dl.Segments = e.planFor(probe)
+		dl.Segments = e.planFor(e.segmentsFor(dl), probe)
 		return true
 	}
 
@@ -103,7 +111,7 @@ func (e *Engine) resolveRecord(dl *Download, fetchURL, dest string, probe ProbeI
 		dl.TotalSize = probe.Size
 		dl.ETag = probe.ETag
 		dl.LastModified = probe.LastModified
-		dl.Segments = e.planFor(probe)
+		dl.Segments = e.planFor(e.segmentsFor(dl), probe)
 		return true
 	}
 
@@ -138,12 +146,16 @@ func (e *Engine) transfer(ctx context.Context, dl *Download, fresh bool) (*Downl
 	defer e.observeStop(dl.ID)
 
 	// Per-download bandwidth cap: one bucket shared by this download's segments,
-	// independent of the engine-wide globalLimiter. nil (no cap) is a true no-op at
-	// the flush boundary. Built here, threaded down exactly like prog.
-	var limiter *rateLimiter
-	if rate := int64(e.cfg.PerDownloadMaxRate); rate > 0 {
-		limiter = newRateLimiter(rate, rateBurst(rate, e.bufSize(), int64(e.cfg.RateBurst)))
+	// independent of the engine-wide globalLimiter. The bucket lives behind an atomic
+	// pointer so Manager.SetRate can swap it live (nil = no cap, a true no-op at the
+	// flush boundary). It is registered for the run's duration so SetDownloadRate can
+	// find it, and threaded down exactly like prog.
+	limiter := new(atomic.Pointer[rateLimiter])
+	if rate := int64(e.effectiveDownloadRate(dl.MaxRate)); rate > 0 {
+		limiter.Store(newRateLimiter(rate, rateBurst(rate, e.bufSize(), int64(e.cfg.RateBurst))))
 	}
+	e.activeLimiters.Store(dl.ID, limiter)
+	defer e.activeLimiters.Delete(dl.ID)
 
 	runErr := e.runSegments(ctx, dl, part, prog, limiter)
 
@@ -202,7 +214,7 @@ func (e *Engine) prepareDownload(ctx context.Context, url, fetchURL, dest string
 		Status:       StatusActive,
 		ETag:         probe.ETag,
 		LastModified: probe.LastModified,
-		Segments:     e.planFor(probe),
+		Segments:     e.planFor(e.defaultSegmentCount(), probe),
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -353,7 +365,7 @@ func repairLayout(dl *Download) {
 // it dispatches to the static fan-out or the work-stealing pool per config. After a
 // clean run it asserts every ranged segment is fully backed (and the bytes sum to a
 // known TotalSize) so no truncated .part is ever renamed.
-func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
+func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *atomic.Pointer[rateLimiter]) error {
 	// Single open-ended segment: unknown size or no range support.
 	if len(dl.Segments) == 1 && dl.Segments[0].End < 0 {
 		runCtx, cancel := context.WithCancelCause(ctx)
@@ -369,11 +381,11 @@ func (e *Engine) runSegments(ctx context.Context, dl *Download, part *os.File, p
 // runStatic is the fixed segmentation: one goroutine per incomplete segment,
 // bounded by SegmentsPerDownload, ranges immutable for the run. On any error all
 // siblings are cancelled via the cause context.
-func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
+func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *atomic.Pointer[rateLimiter]) error {
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	sem := make(chan struct{}, segLimit(e.cfg.SegmentsPerDownload))
+	sem := make(chan struct{}, segLimit(e.segmentsFor(dl)))
 
 	var (
 		wg    sync.WaitGroup
@@ -431,7 +443,7 @@ func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, pro
 // pre-sized to the slot ceiling so a steal never reallocates the arrays the
 // Manager's observer reads. After the pool drains, the durable segment slice is
 // rebuilt from the final layout for the completeness gate and the persisted record.
-func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *rateLimiter) error {
+func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, prog *segProgress, limiter *atomic.Pointer[rateLimiter]) error {
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
@@ -453,7 +465,7 @@ func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, p
 		})
 	}
 
-	for w := 0; w < segLimit(e.cfg.SegmentsPerDownload); w++ {
+	for w := 0; w < segLimit(e.segmentsFor(dl)); w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -592,14 +604,15 @@ func cloneForPersist(dl *Download, prog *segProgress) *Download {
 }
 
 // planFor chooses the segment layout for a probe. When the server supports
-// ranges and discloses a size, it splits into SegmentsPerDownload ranged
-// segments; otherwise it returns one open-ended segment (End == -1) that the
-// whole-body Get path streams sequentially, since ranged GETs are unusable.
-func (e *Engine) planFor(probe ProbeInfo) []Segment {
+// ranges and discloses a size, it splits into segments ranged pieces (the
+// per-download override or the configured default, resolved by the caller);
+// otherwise it returns one open-ended segment (End == -1) that the whole-body
+// Get path streams sequentially, since ranged GETs are unusable.
+func (e *Engine) planFor(segments int, probe ProbeInfo) []Segment {
 	if !probe.SupportsRanges || probe.Size <= 0 {
 		return []Segment{{Index: 0, Start: 0, End: -1}}
 	}
-	return planSegments(probe.Size, e.cfg.SegmentsPerDownload)
+	return planSegments(probe.Size, segments)
 }
 
 // openPart opens (and, when fresh and sized, preallocates) the .part file. For a

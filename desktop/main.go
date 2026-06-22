@@ -72,15 +72,22 @@ func main() {
 	app.Menu.Set(application.DefaultApplicationMenu())
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "gidm",
-		Width:  1100,
-		Height: 720,
+		Title:     "gidm",
+		Width:     1100,
+		Height:    720,
+		MinWidth:  900,
+		MinHeight: 560,
 		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
-			Backdrop:                application.MacBackdropTranslucent,
-			TitleBar:                application.MacTitleBarHiddenInset,
+			// MacTitleBarHidden (not HiddenInset) gives a full-size content window
+			// with floating traffic lights and NO native NSToolbar — HiddenInset
+			// sets UseToolbar:true, which added a tall native toolbar band above our
+			// in-app toolbar. Our toolbar is the drag region via --wails-draggable.
+			Backdrop: application.MacBackdropTranslucent,
+			TitleBar: application.MacTitleBarHidden,
 		},
-		BackgroundColour: application.NewRGB(15, 17, 21),
+		// Matches the frontend's --bg (#0e0e0f) so the native window and the webview
+		// canvas read as one deep, neutral near-black surface.
+		BackgroundColour: application.NewRGB(14, 14, 15),
 		URL:              "/",
 	})
 

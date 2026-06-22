@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 )
 
@@ -58,7 +59,7 @@ func TestResponseRoundTrip(t *testing.T) {
 				t.Errorf("add result = %+v, want %+v", got.Add, tt.resp.Add)
 			}
 			if tt.resp.Status != nil {
-				if got.Status == nil || got.Status.Download != tt.resp.Status.Download {
+				if got.Status == nil || !reflect.DeepEqual(got.Status.Download, tt.resp.Status.Download) {
 					t.Errorf("status result = %+v, want %+v", got.Status, tt.resp.Status)
 				}
 			}
@@ -70,7 +71,7 @@ func TestResponseRoundTrip(t *testing.T) {
 					t.Errorf("list result = %+v, want %+v", got.List, tt.resp.List)
 				} else {
 					for i := range tt.resp.List.Downloads {
-						if got.List.Downloads[i] != tt.resp.List.Downloads[i] {
+						if !reflect.DeepEqual(got.List.Downloads[i], tt.resp.List.Downloads[i]) {
 							t.Errorf("download[%d] = %+v, want %+v", i, got.List.Downloads[i], tt.resp.List.Downloads[i])
 						}
 					}
@@ -97,7 +98,7 @@ func TestListResponsePreservesViews(t *testing.T) {
 		t.Fatalf("downloads = %+v, want 2", got.List)
 	}
 	for i := range views {
-		if got.List.Downloads[i] != views[i] {
+		if !reflect.DeepEqual(got.List.Downloads[i], views[i]) {
 			t.Errorf("download[%d] = %+v, want %+v", i, got.List.Downloads[i], views[i])
 		}
 	}

@@ -7,9 +7,18 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// limPtr wraps a *rateLimiter in the atomic holder progressWriter now reads, so a
+// test can set a fixed bucket while production swaps it live.
+func limPtr(l *rateLimiter) *atomic.Pointer[rateLimiter] {
+	var p atomic.Pointer[rateLimiter]
+	p.Store(l)
+	return &p
+}
 
 // fakeClock is a deterministic clock: now only moves when sleep advances it, so a
 // throttle test asserts exact wait durations with no real waiting. It is safe for
@@ -190,15 +199,15 @@ func TestProgressWriterWriteZeroAllocsLimited(t *testing.T) {
 			dst:           nopWriter{},
 			prog:          newSegProgressSized(seg, 1),
 			plan:          newLivePlan(seg, 1),
-			globalLimiter: huge,
+			globalLimiter: limPtr(huge),
 			nextFlush:     time.Now().Add(time.Hour),
 		},
 		"both buckets": {
 			dst:           nopWriter{},
 			prog:          newSegProgressSized(seg, 1),
 			plan:          newLivePlan(seg, 1),
-			limiter:       newRateLimiter(1<<50, 1<<50),
-			globalLimiter: huge,
+			limiter:       limPtr(newRateLimiter(1<<50, 1<<50)),
+			globalLimiter: limPtr(huge),
 			nextFlush:     time.Now().Add(time.Hour),
 		},
 	}
@@ -228,8 +237,8 @@ func BenchmarkProgressWriterWriteLimited(b *testing.B) {
 		ctx:           context.Background(),
 		prog:          newSegProgressSized(seg, 1),
 		plan:          newLivePlan(seg, 1),
-		limiter:       newRateLimiter(1<<50, 1<<50),
-		globalLimiter: newRateLimiter(1<<50, 1<<50),
+		limiter:       limPtr(newRateLimiter(1<<50, 1<<50)),
+		globalLimiter: limPtr(newRateLimiter(1<<50, 1<<50)),
 		nextFlush:     time.Now().Add(time.Hour),
 	}
 	buf := make([]byte, 64*1024)
@@ -251,8 +260,8 @@ func TestProgressWriterThrottlesBothBuckets(t *testing.T) {
 		ctx:           context.Background(),
 		prog:          newSegProgressSized(seg, 1),
 		plan:          newLivePlan(seg, 1),
-		limiter:       newRateLimiterClock(1000, 2000, dlClk), // per-download: 1000 B/s
-		globalLimiter: newRateLimiterClock(500, 2000, gClk),   // global: 500 B/s
+		limiter:       limPtr(newRateLimiterClock(1000, 2000, dlClk)), // per-download: 1000 B/s
+		globalLimiter: limPtr(newRateLimiterClock(500, 2000, gClk)),   // global: 500 B/s
 		nextFlush:     time.Now().Add(time.Hour),
 	}
 	buf := make([]byte, 1000)

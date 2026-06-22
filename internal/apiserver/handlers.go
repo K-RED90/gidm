@@ -29,7 +29,11 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		if err := api.ValidateAdd(*req.Add); err != nil {
 			return s.toResponse(err), verb, ""
 		}
-		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.defaultPriority))
+		newID, err := s.mgr.Submit(ctx, req.Add.URL, priorityFromView(req.Add.Priority, s.mgr.Settings().DefaultPriority), engine.AddOptions{
+			Dir:      req.Add.Dir,
+			Filename: req.Add.Filename,
+			Segments: req.Add.Segments,
+		})
 		if err != nil {
 			return s.toResponse(err), verb, ""
 		}
@@ -42,7 +46,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		}
 		views := make([]api.DownloadView, 0, len(list))
 		for _, d := range list {
-			views = append(views, toView(d))
+			views = append(views, toView(d, false))
 		}
 		return api.ListResponse(views), verb, ""
 
@@ -58,7 +62,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		if err != nil {
 			return s.toResponse(err), verb, id
 		}
-		return api.StatusResponse(toView(d)), verb, id
+		return api.StatusResponse(toView(d, true)), verb, id
 
 	case api.OpPause:
 		if req.Pause == nil {
@@ -86,6 +90,22 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		}
 		return api.OKResponse(), verb, id
 
+	case api.OpRestart:
+		if req.Restart == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing restart payload"), verb, ""
+		}
+		if err := api.ValidateID(req.Restart.ID); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		id = req.Restart.ID
+		// restart discards the download's progress (checkpoints and .part file) and
+		// re-queues it to download from the beginning, in contrast to resume, which
+		// continues from the last checkpoint.
+		if err := s.mgr.Restart(ctx, id); err != nil {
+			return s.toResponse(err), verb, id
+		}
+		return api.OKResponse(), verb, id
+
 	case api.OpRm:
 		if req.Rm == nil {
 			return api.ErrorResponse(api.CodeBadRequest, "missing rm payload"), verb, ""
@@ -94,9 +114,10 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 			return s.toResponse(err), verb, ""
 		}
 		id = req.Rm.ID
-		// rm maps to Cancel: an operator-initiated stop that keeps the .part for a
-		// later Resume.
-		if err := s.mgr.Cancel(ctx, id); err != nil {
+		// rm deletes the download: it is removed from the store and its .part file is
+		// discarded (a completed download's final file is left in place). To merely
+		// stop a transfer while keeping it for a later Resume, use pause.
+		if err := s.mgr.Delete(ctx, id); err != nil {
 			return s.toResponse(err), verb, id
 		}
 		return api.OKResponse(), verb, id
@@ -109,10 +130,42 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 			return s.toResponse(err), verb, ""
 		}
 		id = req.SetPriority.ID
-		if err := s.mgr.SetPriority(ctx, id, priorityFromView(req.SetPriority.Priority, s.defaultPriority)); err != nil {
+		if err := s.mgr.SetPriority(ctx, id, priorityFromView(req.SetPriority.Priority, s.mgr.Settings().DefaultPriority)); err != nil {
 			return s.toResponse(err), verb, id
 		}
 		return api.OKResponse(), verb, id
+
+	case api.OpSetRate:
+		if req.SetRate == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing set_rate payload"), verb, ""
+		}
+		if err := api.ValidateSetRate(*req.SetRate); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		id = req.SetRate.ID
+		if err := s.mgr.SetRate(ctx, id, req.SetRate.MaxRate); err != nil {
+			return s.toResponse(err), verb, id
+		}
+		return api.OKResponse(), verb, id
+
+	case api.OpGetConfig:
+		return api.ConfigResponse(toConfigView(s.mgr.Settings())), verb, ""
+
+	case api.OpSetConfig:
+		if req.SetConfig == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing set_config payload"), verb, ""
+		}
+		if err := api.ValidateSetConfig(*req.SetConfig); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		// Patch the requested fields onto the current settings (nil fields unchanged),
+		// apply+persist, then echo the now-current settings so the client sees the
+		// effective result.
+		merged := applyConfigPatch(s.mgr.Settings(), *req.SetConfig)
+		if err := s.mgr.SetSettings(ctx, merged); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		return api.ConfigResponse(toConfigView(s.mgr.Settings())), verb, ""
 
 	case api.OpPing:
 		// Health/version only — no Manager call. This also answers the
@@ -140,6 +193,12 @@ func (s *Server) toResponse(err error) api.Response {
 		return api.ErrorResponse(api.CodeBadRequest, "id must be non-empty")
 	case errors.Is(err, api.ErrInvalidPriority):
 		return api.ErrorResponse(api.CodeBadRequest, "priority must be low, normal, or high")
+	case errors.Is(err, api.ErrInvalidDestination):
+		return api.ErrorResponse(api.CodeBadRequest, "dir must be an absolute path and filename a single name")
+	case errors.Is(err, api.ErrInvalidSegments):
+		return api.ErrorResponse(api.CodeBadRequest, "segments must be between 0 and 64")
+	case errors.Is(err, api.ErrInvalidRate):
+		return api.ErrorResponse(api.CodeBadRequest, "rate must be a non-negative number of bytes per second")
 	default:
 		// ErrManagerClosed and any unanticipated failure fall here: log the detail,
 		// return a generic message.

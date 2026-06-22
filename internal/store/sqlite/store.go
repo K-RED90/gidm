@@ -89,6 +89,18 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "downloads", "priority", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	// segment_count carries a per-download segment override; DEFAULT 0 means
+	// "use the configured default", so rows written before it existed behave as
+	// they always did.
+	if err := s.ensureColumn(ctx, "downloads", "segment_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// max_rate carries a per-download bandwidth cap (bytes/sec); DEFAULT 0 means
+	// "inherit the engine default", so rows written before it existed are uncapped
+	// exactly as before.
+	if err := s.ensureColumn(ctx, "downloads", "max_rate", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	return nil
 }
 

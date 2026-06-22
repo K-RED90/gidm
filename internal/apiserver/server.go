@@ -31,13 +31,17 @@ import (
 // the satisfaction assertion lives in the apiserver test, never in package
 // engine, so the engine's import-clean invariant is preserved.
 type Manager interface {
-	Submit(ctx context.Context, url string, priority engine.Priority) (string, error)
+	Submit(ctx context.Context, url string, priority engine.Priority, opts engine.AddOptions) (string, error)
 	List(ctx context.Context) ([]*engine.Download, error)
 	Get(ctx context.Context, id string) (*engine.Download, error)
 	Pause(ctx context.Context, id string) error
 	Resume(ctx context.Context, id string) error
-	Cancel(ctx context.Context, id string) error
+	Restart(ctx context.Context, id string) error
+	Delete(ctx context.Context, id string) error
 	SetPriority(ctx context.Context, id string, priority engine.Priority) error
+	SetRate(ctx context.Context, id string, bps int) error
+	Settings() engine.Settings
+	SetSettings(ctx context.Context, s engine.Settings) error
 }
 
 // ErrAlreadyRunning is returned by Serve when a live daemon already owns the
@@ -50,9 +54,6 @@ type Server struct {
 	mgr    Manager
 	logger *slog.Logger
 	cfg    config.Daemon
-	// defaultPriority is applied to an add request that omits a priority. It is
-	// resolved from config by the daemon, so the default is a tunable, not hardcoded.
-	defaultPriority engine.Priority
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -71,12 +72,13 @@ type Server struct {
 	active map[net.Conn]struct{}
 }
 
-// New builds a Server over mgr, applying defaultPriority to add requests that
-// omit one (the daemon resolves it from config). A nil logger defaults to
-// slog.Default(). Each non-positive timeout/limit in cfg is floored to its
-// package default so a hand-built config.Daemon{} (as in some tests) never yields
-// a zero deadline.
-func New(mgr Manager, logger *slog.Logger, cfg config.Daemon, defaultPriority engine.Priority) *Server {
+// New builds a Server over mgr. The default priority applied to add requests that
+// omit one is read from the Manager's runtime settings (the single source of
+// truth, which the set-config verb can change), not held here. A nil logger
+// defaults to slog.Default(). Each non-positive timeout/limit in cfg is floored to
+// its package default so a hand-built config.Daemon{} (as in some tests) never
+// yields a zero deadline.
+func New(mgr Manager, logger *slog.Logger, cfg config.Daemon) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -92,10 +94,7 @@ func New(mgr Manager, logger *slog.Logger, cfg config.Daemon, defaultPriority en
 	if cfg.MaxRequestBytes < 1 {
 		cfg.MaxRequestBytes = 1 << 20
 	}
-	if !defaultPriority.Valid() {
-		defaultPriority = engine.PriorityNormal
-	}
-	return &Server{mgr: mgr, logger: logger, cfg: cfg, defaultPriority: defaultPriority, active: make(map[net.Conn]struct{})}
+	return &Server{mgr: mgr, logger: logger, cfg: cfg, active: make(map[net.Conn]struct{})}
 }
 
 // Serve binds the configured socket and accepts connections until Close is

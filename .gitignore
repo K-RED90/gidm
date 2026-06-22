@@ -28,3 +28,4 @@ coverage.txt
 # Node (extension / desktop frontends)
 node_modules/
 dist/
+.vite/

@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS downloads (
 	checksum      TEXT NOT NULL,
 	created_at    TEXT NOT NULL,
 	updated_at    TEXT NOT NULL,
-	priority      INTEGER NOT NULL DEFAULT 0
+	priority      INTEGER NOT NULL DEFAULT 0,
+	segment_count INTEGER NOT NULL DEFAULT 0,
+	max_rate      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS segments (

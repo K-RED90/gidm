@@ -74,7 +74,7 @@ func newHarness(t *testing.T) *testHarness {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := shortSocketPath(t)
-	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -146,7 +146,7 @@ func newSlowHarness(t *testing.T) *testHarness {
 	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	sock := shortSocketPath(t)
-	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock}, engine.PriorityNormal)
+	srv := apiserver.New(mgr, nil, config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)
@@ -357,6 +357,29 @@ func TestPauseResumeRmHumanAndJSON(t *testing.T) {
 		}
 	})
 
+	t.Run("restart ack", func(t *testing.T) {
+		// Pause first so restart lands on a settled download deterministically; the
+		// ack word and id come from the request since the response carries no body.
+		h := newSlowHarness(t)
+		id := h.addOne(t)
+
+		code, _, stderr := h.runCLI("pause", id)
+		if code != 0 {
+			t.Fatalf("pause exit = %d, stderr=%q", code, stderr)
+		}
+		if !h.waitForStatus(t, id, api.StatusPaused) {
+			t.Fatal("download never reached paused")
+		}
+
+		code, stdout, stderr := h.runCLI("restart", id)
+		if code != 0 {
+			t.Fatalf("restart exit = %d, stderr=%q", code, stderr)
+		}
+		if !strings.Contains(stdout, "restarting") || !strings.Contains(stdout, id) {
+			t.Errorf("restart ack = %q, want restarting + id", stdout)
+		}
+	})
+
 	t.Run("json acks", func(t *testing.T) {
 		h := newSlowHarness(t)
 		id := h.addOne(t)
@@ -446,6 +469,7 @@ func TestArityErrors(t *testing.T) {
 		{"list", "extra"},        // list takes none
 		{"set-priority"},         // missing id and level
 		{"set-priority", "only"}, // missing level
+		{"restart"},              // missing id
 		{"bogus"},                // unknown command
 	}
 	for _, args := range cases {

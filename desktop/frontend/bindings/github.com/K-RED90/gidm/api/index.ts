@@ -3,6 +3,11 @@
 
 export {
     DownloadStatus,
-    DownloadView,
     Priority
+} from "./models.js";
+
+export type {
+    ConfigView,
+    DownloadView,
+    SegmentView
 } from "./models.js";

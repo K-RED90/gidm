@@ -10,17 +10,28 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as api$0 from "../../api/models.js";
 
 /**
- * Add submits a URL and returns the new download's id.
+ * Add submits a download and returns its new id. dir, filename, and segments are
+ * optional overrides (empty string / 0 means "let the daemon decide"), so the
+ * frontend's quick-add path can pass ("", "", 0, "") and behave exactly as the
+ * bare-URL form did.
  */
-export function Add(url: string): $CancellablePromise<string> {
-    return $Call.ByID(3931086631, url);
+export function Add(url: string, dir: string, filename: string, segments: number, priority: api$0.Priority): $CancellablePromise<string> {
+    return $Call.ByID(3931086631, url, dir, filename, segments, priority);
+}
+
+/**
+ * GetConfig returns the daemon's current runtime settings (download dir, default
+ * segments/priority, and the global + per-download speed caps).
+ */
+export function GetConfig(): $CancellablePromise<api$0.ConfigView> {
+    return $Call.ByID(2034797030);
 }
 
 /**
@@ -35,10 +46,17 @@ export function Health(): $CancellablePromise<boolean> {
  * List returns every download. It never returns a nil slice on success so the
  * frontend can bind it directly.
  */
-export function List(): $CancellablePromise<api$0.DownloadView[]> {
-    return $Call.ByID(1299341348).then(($result: any) => {
-        return $$createType1($result);
-    });
+export function List(): $CancellablePromise<api$0.DownloadView[] | null> {
+    return $Call.ByID(1299341348);
+}
+
+/**
+ * OpenFile opens a downloaded file with the OS default application. The path is
+ * the download's destination (the frontend already has it), so no daemon lookup
+ * is needed.
+ */
+export function OpenFile(path: string): $CancellablePromise<void> {
+    return $Call.ByID(207313962, path);
 }
 
 /**
@@ -56,6 +74,15 @@ export function Remove(id: string): $CancellablePromise<void> {
 }
 
 /**
+ * Restart re-downloads from scratch: it discards the download's partial progress
+ * (checkpoints and .part file) and re-queues it from the beginning. Unlike Resume,
+ * it refetches every byte.
+ */
+export function Restart(id: string): $CancellablePromise<void> {
+    return $Call.ByID(1589129447, id);
+}
+
+/**
  * Resume re-queues a paused/failed/completed download.
  */
 export function Resume(id: string): $CancellablePromise<void> {
@@ -63,26 +90,51 @@ export function Resume(id: string): $CancellablePromise<void> {
 }
 
 /**
+ * RevealInFolder shows a file in the OS file manager, selecting it where the
+ * platform supports it.
+ */
+export function RevealInFolder(path: string): $CancellablePromise<void> {
+    return $Call.ByID(2540813946, path);
+}
+
+/**
+ * SetConfig changes the daemon's runtime settings from the Settings form. The
+ * desktop sends the fully-populated form (it pre-fills from GetConfig), so every
+ * field is set; rates are bytes/sec with 0 = unlimited. It returns the now-current
+ * settings so the UI reflects any normalization the daemon applied.
+ */
+export function SetConfig(downloadDir: string, segments: number, priority: api$0.Priority, maxRate: number, perDownloadMaxRate: number): $CancellablePromise<api$0.ConfigView> {
+    return $Call.ByID(2856010546, downloadDir, segments, priority, maxRate, perDownloadMaxRate);
+}
+
+/**
+ * SetPriority changes a download's scheduling priority (low/normal/high).
+ */
+export function SetPriority(id: string, priority: api$0.Priority): $CancellablePromise<void> {
+    return $Call.ByID(1176805276, id, priority);
+}
+
+/**
+ * SetRate caps a single download to bps bytes/sec; 0 removes the per-download cap
+ * (the download then inherits the daemon default). Applied live by the daemon if
+ * the download is running.
+ */
+export function SetRate(id: string, bps: number): $CancellablePromise<void> {
+    return $Call.ByID(1895515046, id, bps);
+}
+
+/**
  * Snapshot is the event pump's read: the current downloads plus whether the
  * daemon was reachable. A transport error yields (nil, false) so the UI can show
  * a "daemon unreachable" state without distinguishing error kinds.
  */
-export function Snapshot(): $CancellablePromise<[api$0.DownloadView[], boolean]> {
-    return $Call.ByID(3366026168).then(($result: any) => {
-        $result[0] = $$createType1($result[0]);
-        return $result;
-    });
+export function Snapshot(): $CancellablePromise<[api$0.DownloadView[] | null, boolean]> {
+    return $Call.ByID(3366026168);
 }
 
 /**
  * Status returns one download by id.
  */
 export function Status(id: string): $CancellablePromise<api$0.DownloadView> {
-    return $Call.ByID(3632350566, id).then(($result: any) => {
-        return $$createType0($result);
-    });
+    return $Call.ByID(3632350566, id);
 }
-
-// Private type creation functions
-const $$createType0 = api$0.DownloadView.createFrom;
-const $$createType1 = $Create.Array($$createType0);

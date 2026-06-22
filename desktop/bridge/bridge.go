@@ -29,9 +29,18 @@ type Bridge struct {
 // New builds a Bridge over a daemon client.
 func New(c *client.Client) *Bridge { return &Bridge{client: c} }
 
-// Add submits a URL and returns the new download's id.
-func (b *Bridge) Add(url string) (string, error) {
-	resp, err := b.client.Do(context.Background(), api.NewAddRequest(url))
+// Add submits a download and returns its new id. dir, filename, and segments are
+// optional overrides (empty string / 0 means "let the daemon decide"), so the
+// frontend's quick-add path can pass ("", "", 0, "") and behave exactly as the
+// bare-URL form did.
+func (b *Bridge) Add(url, dir, filename string, segments int, priority api.Priority) (string, error) {
+	req := api.NewAddRequestWithOptions(url, api.Add{
+		Priority: priority,
+		Dir:      dir,
+		Filename: filename,
+		Segments: segments,
+	})
+	resp, err := b.client.Do(context.Background(), req)
 	if err != nil {
 		return "", err
 	}
@@ -75,8 +84,69 @@ func (b *Bridge) Pause(id string) error { return b.ack(api.NewPauseRequest(id)) 
 // Resume re-queues a paused/failed/completed download.
 func (b *Bridge) Resume(id string) error { return b.ack(api.NewResumeRequest(id)) }
 
+// Restart re-downloads from scratch: it discards the download's partial progress
+// (checkpoints and .part file) and re-queues it from the beginning. Unlike Resume,
+// it refetches every byte.
+func (b *Bridge) Restart(id string) error { return b.ack(api.NewRestartRequest(id)) }
+
 // Remove deletes a download.
 func (b *Bridge) Remove(id string) error { return b.ack(api.NewRmRequest(id)) }
+
+// SetPriority changes a download's scheduling priority (low/normal/high).
+func (b *Bridge) SetPriority(id string, priority api.Priority) error {
+	return b.ack(api.NewSetPriorityRequest(id, priority))
+}
+
+// SetRate caps a single download to bps bytes/sec; 0 removes the per-download cap
+// (the download then inherits the daemon default). Applied live by the daemon if
+// the download is running.
+func (b *Bridge) SetRate(id string, bps int) error {
+	return b.ack(api.NewSetRateRequest(id, bps))
+}
+
+// GetConfig returns the daemon's current runtime settings (download dir, default
+// segments/priority, and the global + per-download speed caps).
+func (b *Bridge) GetConfig() (api.ConfigView, error) {
+	resp, err := b.client.Do(context.Background(), api.NewGetConfigRequest())
+	if err != nil {
+		return api.ConfigView{}, err
+	}
+	if !resp.OK || resp.Config == nil {
+		return api.ConfigView{}, respErr(resp)
+	}
+	return resp.Config.Config, nil
+}
+
+// SetConfig changes the daemon's runtime settings from the Settings form. The
+// desktop sends the fully-populated form (it pre-fills from GetConfig), so every
+// field is set; rates are bytes/sec with 0 = unlimited. It returns the now-current
+// settings so the UI reflects any normalization the daemon applied.
+func (b *Bridge) SetConfig(downloadDir string, segments int, priority api.Priority, maxRate, perDownloadMaxRate int) (api.ConfigView, error) {
+	sc := api.SetConfig{
+		DownloadDir:         &downloadDir,
+		SegmentsPerDownload: &segments,
+		DefaultPriority:     &priority,
+		MaxRate:             &maxRate,
+		PerDownloadMaxRate:  &perDownloadMaxRate,
+	}
+	resp, err := b.client.Do(context.Background(), api.NewSetConfigRequest(sc))
+	if err != nil {
+		return api.ConfigView{}, err
+	}
+	if !resp.OK || resp.Config == nil {
+		return api.ConfigView{}, respErr(resp)
+	}
+	return resp.Config.Config, nil
+}
+
+// OpenFile opens a downloaded file with the OS default application. The path is
+// the download's destination (the frontend already has it), so no daemon lookup
+// is needed.
+func (b *Bridge) OpenFile(path string) error { return openPath(path) }
+
+// RevealInFolder shows a file in the OS file manager, selecting it where the
+// platform supports it.
+func (b *Bridge) RevealInFolder(path string) error { return revealPath(path) }
 
 // Health reports whether gidmd answers a ping. Any transport error or a
 // non-pong response reads as "not running".

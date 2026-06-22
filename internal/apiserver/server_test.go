@@ -32,23 +32,43 @@ type fakeManager struct {
 	listErr        error
 	pauseErr       error
 	resumeErr      error
-	cancelErr      error
+	restartErr     error
+	deleteErr      error
 	setPriorityErr error
+	setRateErr     error
+	setSettingsErr error
+
+	// settings is what Settings() returns and SetSettings() stores; the zero value
+	// has DefaultPriority == PriorityNormal, matching the old New default.
+	settings engine.Settings
+
+	// lastAddOpts records the options of the most recent Submit so a handler test
+	// can assert the add op forwards Dir/Filename/Segments unchanged. lastSetRate
+	// records the most recent SetRate likewise.
+	lastAddOpts engine.AddOptions
+	lastSetRate struct {
+		id  string
+		bps int
+	}
 }
 
 func newFakeManager() *fakeManager {
 	return &fakeManager{downloads: make(map[string]*engine.Download)}
 }
 
-func (f *fakeManager) Submit(_ context.Context, url string, priority engine.Priority) (string, error) {
+func (f *fakeManager) Submit(_ context.Context, url string, priority engine.Priority, opts engine.AddOptions) (string, error) {
 	if f.submitErr != nil {
 		return "", f.submitErr
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastAddOpts = opts
 	f.nextID++
 	id := "id-" + string(rune('a'+f.nextID-1))
-	f.downloads[id] = &engine.Download{ID: id, URL: url, Status: engine.StatusQueued, Priority: priority}
+	f.downloads[id] = &engine.Download{
+		ID: id, URL: url, Status: engine.StatusQueued, Priority: priority,
+		Destination: opts.Dir, SegmentCount: opts.Segments,
+	}
 	return id, nil
 }
 
@@ -100,8 +120,32 @@ func (f *fakeManager) Resume(_ context.Context, id string) error {
 	return f.setStatus(id, engine.StatusQueued, f.resumeErr)
 }
 
-func (f *fakeManager) Cancel(_ context.Context, id string) error {
-	return f.setStatus(id, engine.StatusCanceled, f.cancelErr)
+func (f *fakeManager) Restart(_ context.Context, id string) error {
+	if f.restartErr != nil {
+		return f.restartErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.downloads[id]
+	if !ok {
+		return engine.ErrNotFound
+	}
+	d.Status = engine.StatusQueued
+	d.Segments = nil
+	return nil
+}
+
+func (f *fakeManager) Delete(_ context.Context, id string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.downloads[id]; !ok {
+		return engine.ErrNotFound
+	}
+	delete(f.downloads, id)
+	return nil
 }
 
 func (f *fakeManager) SetPriority(_ context.Context, id string, p engine.Priority) error {
@@ -118,6 +162,37 @@ func (f *fakeManager) SetPriority(_ context.Context, id string, p engine.Priorit
 	return nil
 }
 
+func (f *fakeManager) SetRate(_ context.Context, id string, bps int) error {
+	if f.setRateErr != nil {
+		return f.setRateErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.downloads[id]
+	if !ok {
+		return engine.ErrNotFound
+	}
+	d.MaxRate = bps
+	f.lastSetRate.id, f.lastSetRate.bps = id, bps
+	return nil
+}
+
+func (f *fakeManager) Settings() engine.Settings {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.settings
+}
+
+func (f *fakeManager) SetSettings(_ context.Context, s engine.Settings) error {
+	if f.setSettingsErr != nil {
+		return f.setSettingsErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settings = s
+	return nil
+}
+
 // startServer spins up a real Server on a socket in t.TempDir and returns the
 // socket path. It blocks until the listener is bound so tests never race the
 // Accept loop.
@@ -125,7 +200,7 @@ func startServer(t *testing.T, mgr apiserver.Manager) (*apiserver.Server, string
 	t.Helper()
 	sock := tempSocketPath(t)
 	cfg := config.Daemon{SocketPath: sock} // zero timeouts: New must floor them
-	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), cfg)
 
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
@@ -249,12 +324,20 @@ func TestRoundTripAllVerbs(t *testing.T) {
 		t.Fatalf("after resume status = %q, want queued", r.Status.Download.Status)
 	}
 
-	// rm -> Cancel; engine canceled maps to api paused on the wire
+	// restart -> ok, re-queues the download from scratch
+	if r := roundTrip(t, sock, api.NewRestartRequest(id)); !r.OK {
+		t.Fatalf("restart: got %+v", r)
+	}
+	if r := roundTrip(t, sock, api.NewStatusRequest(id)); r.Status.Download.Status != api.StatusQueued {
+		t.Fatalf("after restart status = %q, want queued", r.Status.Download.Status)
+	}
+
+	// rm deletes the download outright; a later status is not_found
 	if r := roundTrip(t, sock, api.NewRmRequest(id)); !r.OK {
 		t.Fatalf("rm: got %+v", r)
 	}
-	if r := roundTrip(t, sock, api.NewStatusRequest(id)); r.Status.Download.Status != api.StatusPaused {
-		t.Fatalf("after rm status = %q, want paused (canceled->paused drift)", r.Status.Download.Status)
+	if r := roundTrip(t, sock, api.NewStatusRequest(id)); r.OK || r.Error == nil || r.Error.Code != api.CodeNotFound {
+		t.Fatalf("after rm status = %+v, want not_found", r)
 	}
 
 	// ping -> version
@@ -277,6 +360,9 @@ func TestErrorCodes(t *testing.T) {
 		{"empty id status", api.NewStatusRequest("   "), api.CodeBadRequest},
 		{"not found status", api.NewStatusRequest("missing"), api.CodeNotFound},
 		{"not found pause", api.NewPauseRequest("missing"), api.CodeNotFound},
+		{"restart empty id", api.NewRestartRequest("  "), api.CodeBadRequest},
+		{"restart not found", api.NewRestartRequest("missing"), api.CodeNotFound},
+		{"restart missing payload", api.Request{Version: api.Version, Op: api.OpRestart}, api.CodeBadRequest},
 		{"unknown op", api.Request{Version: api.Version, Op: "frobnicate"}, api.CodeBadRequest},
 		{"bad version", api.Request{Version: 999, Op: api.OpPing}, api.CodeUnsupportedVersion},
 		{"missing add payload", api.Request{Version: api.Version, Op: api.OpAdd}, api.CodeBadRequest},
@@ -330,13 +416,39 @@ func TestPriorityEndToEnd(t *testing.T) {
 	}
 }
 
+// TestAddForwardsOptions asserts the add handler decodes Dir/Filename/Segments and
+// forwards them to the Manager unchanged, and that an invalid override is rejected
+// at the server before reaching the Manager.
+func TestAddForwardsOptions(t *testing.T) {
+	mgr := newFakeManager()
+	_, sock := startServer(t, mgr)
+
+	dir := t.TempDir() // an OS-absolute, clean dir the destination validator accepts on every platform
+	resp := roundTrip(t, sock, api.NewAddRequestWithOptions("https://example.com/f.bin", api.Add{
+		Dir: dir, Filename: "chosen.bin", Segments: 12,
+	}))
+	if !resp.OK || resp.Add == nil {
+		t.Fatalf("add: %+v", resp)
+	}
+	if got := mgr.lastAddOpts; got.Dir != dir || got.Filename != "chosen.bin" || got.Segments != 12 {
+		t.Errorf("forwarded opts = %+v, want {%s chosen.bin 12}", got, dir)
+	}
+
+	// An invalid destination is rejected with bad_request and never reaches Submit.
+	bad := roundTrip(t, sock, api.NewAddRequestWithOptions("https://example.com/f.bin", api.Add{Dir: "relative/dir"}))
+	if bad.OK || bad.Error == nil || bad.Error.Code != api.CodeBadRequest {
+		t.Errorf("invalid dir add = %+v, want bad_request", bad)
+	}
+}
+
 // TestServerAppliesConfiguredDefaultPriority constructs a server whose default is
 // high and asserts an add that omits a priority is stored at that default — proving
 // the default is config-driven, not hardcoded to normal.
 func TestServerAppliesConfiguredDefaultPriority(t *testing.T) {
 	mgr := newFakeManager()
+	mgr.settings.DefaultPriority = engine.PriorityHigh // the daemon's runtime default
 	sock := tempSocketPath(t)
-	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock}, engine.PriorityHigh)
+	srv := apiserver.New(mgr, testLogger(), config.Daemon{SocketPath: sock})
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListeningOrServeErr(t, sock, served)
@@ -406,7 +518,7 @@ func TestOversizedRequestRejected(t *testing.T) {
 	mgr := newFakeManager()
 	sock := tempSocketPath(t)
 	cfg := config.Daemon{SocketPath: sock, MaxRequestBytes: 64} // tiny cap
-	srv := apiserver.New(mgr, testLogger(), cfg, engine.PriorityNormal)
+	srv := apiserver.New(mgr, testLogger(), cfg)
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(context.Background()) }()
 	waitListening(t, sock)

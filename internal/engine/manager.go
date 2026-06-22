@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 )
@@ -68,19 +69,21 @@ type Manager struct {
 	// it is read-only thereafter and needs no lock.
 	clock func() time.Time
 
-	mu       sync.Mutex
-	cond     *sync.Cond // signalled when work is enqueued or the manager closes
-	pending  []pendingItem
-	seq      uint64 // monotonic enqueue counter; the stable FIFO tiebreak
-	started  bool
-	closed   bool
-	cancels  map[string]context.CancelFunc // one per active job
-	intents  map[string]Status             // operator intent (paused/canceled) for an in-flight job
-	live     map[string]*segProgress       // live counters for active jobs
-	rates    map[string]*rateState         // smoothed transfer rate per active job
-	baseCtx  context.Context
-	baseStop context.CancelFunc
-	workers  sync.WaitGroup
+	mu         sync.Mutex
+	cond       *sync.Cond // signalled when work is enqueued or the manager closes
+	pending    []pendingItem
+	seq        uint64 // monotonic enqueue counter; the stable FIFO tiebreak
+	started    bool
+	closed     bool
+	cancels    map[string]context.CancelFunc // one per active job
+	intents    map[string]Status             // operator intent (paused/canceled) for an in-flight job
+	deleting   map[string]deleteReq          // pending delete for an active job, settled by its worker
+	restarting map[string]restartReq         // pending from-scratch restart for an active job, settled by its worker
+	live       map[string]*segProgress       // live counters for active jobs
+	rates      map[string]*rateState         // smoothed transfer rate per active job
+	baseCtx    context.Context
+	baseStop   context.CancelFunc
+	workers    sync.WaitGroup
 }
 
 // pendingItem is one queued download awaiting a free slot. seq orders items of
@@ -101,15 +104,17 @@ func NewManager(e *Engine, store Store, maxConcurrent int) *Manager {
 		maxConcurrent = 1
 	}
 	m := &Manager{
-		engine:  e,
-		store:   store,
-		max:     maxConcurrent,
-		logger:  slog.Default(),
-		clock:   time.Now,
-		cancels: make(map[string]context.CancelFunc),
-		intents: make(map[string]Status),
-		live:    make(map[string]*segProgress),
-		rates:   make(map[string]*rateState),
+		engine:     e,
+		store:      store,
+		max:        maxConcurrent,
+		logger:     slog.Default(),
+		clock:      time.Now,
+		cancels:    make(map[string]context.CancelFunc),
+		intents:    make(map[string]Status),
+		deleting:   make(map[string]deleteReq),
+		restarting: make(map[string]restartReq),
+		live:       make(map[string]*segProgress),
+		rates:      make(map[string]*rateState),
 	}
 	m.cond = sync.NewCond(&m.mu)
 	e.observer = m
@@ -188,21 +193,34 @@ func (m *Manager) recover(ctx context.Context) error {
 	return nil
 }
 
+// AddOptions carries the optional per-download overrides a Submit may specify.
+// The zero value (all fields empty/zero) reproduces the bare-URL add: the engine
+// derives the destination from the probe and uses the configured segment count.
+type AddOptions struct {
+	Dir      string // destination directory; "" → configured download dir
+	Filename string // output filename; "" → server-suggested or URL-derived
+	Segments int    // per-download segment count; 0 → configured default
+}
+
 // Submit persists a new queued download at the given priority and enqueues it,
-// returning its ID immediately without blocking on the transfer.
-func (m *Manager) Submit(ctx context.Context, url string, priority Priority) (string, error) {
+// returning its ID immediately without blocking on the transfer. opts supplies
+// optional destination/segment overrides, resolved here so they survive the
+// queue and a worker picks them up from the persisted record.
+func (m *Manager) Submit(ctx context.Context, url string, priority Priority, opts AddOptions) (string, error) {
 	id, err := newID()
 	if err != nil {
 		return "", err
 	}
 	now := time.Now().UTC()
 	dl := &Download{
-		ID:        id,
-		URL:       url,
-		Status:    StatusQueued,
-		Priority:  priority,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           id,
+		URL:          url,
+		Destination:  m.engine.plannedDest(opts.Dir, opts.Filename, url),
+		Status:       StatusQueued,
+		Priority:     priority,
+		SegmentCount: m.engine.clampSegments(opts.Segments),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 	if err := m.store.SaveDownload(ctx, dl); err != nil {
 		return "", fmt.Errorf("engine: manager submit %q: %w", url, err)
@@ -292,6 +310,64 @@ func (m *Manager) Cancel(ctx context.Context, id string) error {
 	return m.stop(ctx, id, StatusCanceled)
 }
 
+// deleteReq is a pending delete handed to an active job's worker: the worker
+// removes the record on its settle path (so no late checkpoint or status write
+// can recreate it) and closes done to release the Delete caller.
+type deleteReq struct {
+	dest string
+	done chan struct{}
+}
+
+// Delete removes a download from the store entirely and discards its partial
+// (.part) file. Unlike Cancel, nothing is kept for a later Resume — the record
+// disappears from List. A completed download's final file is left untouched
+// (only the .part, which no longer exists, is removed). Deleting an unknown id
+// returns ErrNotFound.
+//
+// For an idle download Delete removes the record directly. For one a worker is
+// actively transferring, removing the record here would race the worker's own
+// store writes (a checkpoint or the settle-time status override could recreate
+// it). So Delete instead aborts the transfer and hands the removal to the
+// worker's settle path, which runs after all of that job's writes are done, then
+// waits for it to finish. Either way the record and its .part are gone on return.
+func (m *Manager) Delete(ctx context.Context, id string) error {
+	d, err := m.store.LoadDownload(ctx, id)
+	if err != nil {
+		return fmt.Errorf("engine: manager delete %q: %w", id, err)
+	}
+
+	m.mu.Lock()
+	cancel := m.cancels[id]
+	var done chan struct{}
+	if cancel != nil {
+		done = make(chan struct{})
+		m.deleting[id] = deleteReq{dest: d.Destination, done: done}
+	}
+	m.mu.Unlock()
+
+	if cancel == nil {
+		return m.removeRecord(ctx, id, d.Destination) // idle: safe to remove now
+	}
+
+	cancel() // abort the transfer; the worker's finishJob removes the record
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// removeRecord deletes the store record and discards its .part file. The final
+// file of a completed download is never touched (its .part no longer exists).
+func (m *Manager) removeRecord(ctx context.Context, id, dest string) error {
+	if err := m.store.DeleteDownload(ctx, id); err != nil {
+		return fmt.Errorf("engine: manager delete %q: %w", id, err)
+	}
+	_ = os.Remove(dest + partSuffix)
+	return nil
+}
+
 // stop records the operator's intent (paused/canceled), cancels the in-flight
 // context if the job is running, and persists the target status. The intent is
 // always recorded under the mutex — even for a job not yet running — so a worker
@@ -360,6 +436,95 @@ func (m *Manager) Resume(ctx context.Context, id string) error {
 	if err := m.store.SaveDownload(ctx, d); err != nil {
 		return fmt.Errorf("engine: manager resume persist %q: %w", id, err)
 	}
+	return m.enqueue(id, d.Priority)
+}
+
+// restartReq is a pending from-scratch restart handed to an active job's worker:
+// the worker discards the job's progress and re-enqueues it on its settle path (so
+// no late checkpoint or status write can resurrect the discarded bytes), then
+// closes done to release the Restart caller.
+type restartReq struct {
+	done chan struct{}
+}
+
+// Restart re-downloads from the beginning, discarding all progress: the persisted
+// segment checkpoints and the partial .part file are thrown away and the record is
+// re-queued so the engine re-probes and re-plans fresh segments. Unlike Resume,
+// which continues from the last checkpoint, Restart refetches every byte — use it
+// when a partial transfer is corrupt or the remote file changed. It is valid from
+// any state. A completed download's final file is left in place until the new run
+// finalizes over it. Restarting an unknown id returns ErrNotFound.
+//
+// For an idle download the reset happens directly. For one a worker is actively
+// transferring, resetting here would race the worker's own store writes (a
+// checkpoint or settle-time status override could resurrect the discarded
+// progress). So Restart aborts the transfer and hands the reset to the worker's
+// settle path — which runs after all of that job's writes are done — then waits for
+// it to finish. Either way the download is re-queued from scratch on return.
+func (m *Manager) Restart(ctx context.Context, id string) error {
+	if _, err := m.store.LoadDownload(ctx, id); err != nil {
+		return fmt.Errorf("engine: manager restart %q: %w", id, err)
+	}
+
+	m.mu.Lock()
+	cancel := m.cancels[id]
+	var done chan struct{}
+	if cancel != nil {
+		done = make(chan struct{})
+		m.restarting[id] = restartReq{done: done}
+	}
+	m.mu.Unlock()
+
+	if cancel == nil {
+		return m.resetAndEnqueue(ctx, id) // idle: safe to reset now
+	}
+
+	cancel() // abort the transfer; the worker's finishJob resets and re-enqueues it
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// resetAndEnqueue discards a download's progress — its persisted segment
+// checkpoints and partial .part file — resets the record to queued, and
+// re-enqueues it so the engine re-probes and re-plans fresh segments on the next
+// run. Clearing the segment slice is what makes resolveRecord treat the next run as
+// a first run; SaveDownload's wholesale segment replace persists the clear. A record
+// deleted concurrently (ErrNotFound) is a no-op.
+func (m *Manager) resetAndEnqueue(ctx context.Context, id string) error {
+	d, err := m.store.LoadDownload(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil // deleted concurrently; nothing to restart
+		}
+		return fmt.Errorf("engine: manager restart %q: %w", id, err)
+	}
+
+	// Discard the partial file so even a same-size remote restarts from zero bytes: a
+	// fresh sized run re-truncates the .part, but an unknown-size run would otherwise
+	// reuse stale bytes. A completed download's final file is left untouched until the
+	// new run finalizes over it.
+	_ = os.Remove(d.Destination + partSuffix)
+
+	d.Status = StatusQueued
+	d.Segments = nil
+	d.TotalSize = 0
+	d.ETag = ""
+	d.LastModified = ""
+	d.UpdatedAt = time.Now().UTC()
+	if err := m.store.SaveDownload(ctx, d); err != nil {
+		return fmt.Errorf("engine: manager restart persist %q: %w", id, err)
+	}
+
+	// Clear any stale stop-intent so the worker that picks this up runs the transfer
+	// rather than immediately honoring a prior pause/cancel.
+	m.mu.Lock()
+	delete(m.intents, id)
+	m.mu.Unlock()
+
 	return m.enqueue(id, d.Priority)
 }
 
@@ -565,7 +730,42 @@ func (m *Manager) finishJob(id string, runErr error, startIntent Status, shuttin
 	}
 	delete(m.intents, id)
 	delete(m.cancels, id)
+	del, deleting := m.deleting[id]
+	delete(m.deleting, id)
+	res, restarting := m.restarting[id]
+	delete(m.restarting, id)
 	m.mu.Unlock()
+
+	if deleting {
+		// A Delete is waiting on this job. Now that the run has fully returned (so no
+		// further checkpoint or status write will land), remove the record and its
+		// .part, then release the caller. Use a detached, bounded context so the
+		// removal still lands even if the base context is aborting (shutdown).
+		ctx, stop := context.WithTimeout(context.WithoutCancel(m.baseCtx), 5*time.Second)
+		if err := m.removeRecord(ctx, id, del.dest); err != nil {
+			m.logger.Error("engine: manager could not delete record on settle", "download_id", id, "err", err)
+		}
+		stop()
+		close(del.done)
+		if restarting {
+			close(res.done) // a Delete raced this Restart: the record is gone, nothing to restart
+		}
+		return
+	}
+
+	if restarting {
+		// A Restart is waiting on this job. The run has fully returned, so no later
+		// checkpoint can resurrect the discarded progress; throw it away and re-queue
+		// from scratch on a detached, bounded context (the base context may be aborting
+		// on shutdown — the reset record stays queued so a later Start recovers it).
+		ctx, stop := context.WithTimeout(context.WithoutCancel(m.baseCtx), 5*time.Second)
+		if err := m.resetAndEnqueue(ctx, id); err != nil {
+			m.logger.Error("engine: manager could not restart record on settle", "download_id", id, "err", err)
+		}
+		stop()
+		close(res.done)
+		return
+	}
 
 	m.classify(id, runErr, intent, shuttingDown)
 }

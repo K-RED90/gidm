@@ -15,6 +15,7 @@ func TestRequestRoundTrip(t *testing.T) {
 		{"status", NewStatusRequest("d1")},
 		{"pause", NewPauseRequest("d1")},
 		{"resume", NewResumeRequest("d1")},
+		{"restart", NewRestartRequest("d1")},
 		{"rm", NewRmRequest("d1")},
 		{"ping", NewPingRequest()},
 		{"unknown verb", Request{Version: Version, Op: Op("frobnicate")}},
@@ -55,6 +56,12 @@ func TestRequestRoundTrip(t *testing.T) {
 			}
 			if tt.req.Resume != nil && got.Resume != nil && got.Resume.ID != tt.req.Resume.ID {
 				t.Errorf("resume id = %q, want %q", got.Resume.ID, tt.req.Resume.ID)
+			}
+			if (tt.req.Restart == nil) != (got.Restart == nil) {
+				t.Fatalf("restart payload presence mismatch: got %+v want %+v", got.Restart, tt.req.Restart)
+			}
+			if tt.req.Restart != nil && got.Restart != nil && got.Restart.ID != tt.req.Restart.ID {
+				t.Errorf("restart id = %q, want %q", got.Restart.ID, tt.req.Restart.ID)
 			}
 			if (tt.req.Rm == nil) != (got.Rm == nil) {
 				t.Fatalf("rm payload presence mismatch: got %+v want %+v", got.Rm, tt.req.Rm)
