@@ -39,15 +39,39 @@
 </script>
 
 <header class="toolbar" style="--wails-draggable: drag">
+  <!-- Left: Add URL or selection badge -->
   {#if selecting}
-    <div class="selbar" style="--wails-draggable: no-drag" in:fly={flyIn}>
+    <div class="sel-badge" style="--wails-draggable: no-drag" in:fly={flyIn}>
       <button class="iconbtn" aria-label="Clear selection" title="Clear selection" onclick={() => store.clearSelection()}>
         <Icon name="close" size={15} />
       </button>
       <span class="count">{store.selectedIds.size} selected</span>
+    </div>
+  {:else}
+    <button class="primary" style="--wails-draggable: no-drag" onclick={onAdd} disabled={!store.daemonUp}>
+      <Icon name="plus" size={14} />
+      Add URL
+    </button>
+  {/if}
 
-      <span class="flex1"></span>
+  <!-- Center: search (always visible) -->
+  <span class="flex1"></span>
+  <div class="search" style="--wails-draggable: no-drag">
+    <Icon name="search" size={13} />
+    <input
+      type="text"
+      placeholder="Search"
+      bind:value={store.query}
+      spellcheck="false"
+      autocomplete="off"
+      aria-label="Search downloads"
+    />
+  </div>
+  <span class="flex1"></span>
 
+  <!-- Right cluster: selection actions OR global controls -->
+  <div class="cluster" style="--wails-draggable: no-drag">
+    {#if selecting}
       <button class="ghost" disabled={!store.canPauseSelected} onclick={() => store.pauseSelected()}>
         <Icon name="pause" size={14} />
         <span class="lbl">Pause</span>
@@ -65,31 +89,7 @@
         <Icon name="trash" size={14} />
         <span class="lbl">Remove</span>
       </button>
-    </div>
-  {:else}
-    <!-- Primary action -->
-    <button class="primary" style="--wails-draggable: no-drag" onclick={onAdd} disabled={!store.daemonUp}>
-      <Icon name="plus" size={14} />
-      Add URL
-    </button>
-
-    <!-- Search — elastic, centered between the two flex: 1 spacers -->
-    <span class="flex1"></span>
-    <div class="search" style="--wails-draggable: no-drag">
-      <Icon name="search" size={13} />
-      <input
-        type="text"
-        placeholder="Search"
-        bind:value={store.query}
-        spellcheck="false"
-        autocomplete="off"
-        aria-label="Search downloads"
-      />
-    </div>
-    <span class="flex1"></span>
-
-    <!-- Right cluster: sort | resume + pause | settings -->
-    <div class="cluster" style="--wails-draggable: no-drag">
+    {:else}
       <div class="sortwrap">
         <button
           class="iconbtn"
@@ -144,17 +144,17 @@
       </button>
 
       <span class="divider" aria-hidden="true"></span>
+    {/if}
 
-      <button
-        class="iconbtn"
-        onclick={onSettings}
-        title="Settings"
-        aria-label="Settings"
-      >
-        <Icon name="settings" size={16} />
-      </button>
-    </div>
-  {/if}
+    <button
+      class="iconbtn"
+      onclick={onSettings}
+      title="Settings"
+      aria-label="Settings"
+    >
+      <Icon name="settings" size={16} />
+    </button>
+  </div>
 </header>
 
 <style>
@@ -171,13 +171,12 @@
     border-bottom: 1px solid var(--border);
   }
 
-  /* ---- Selection bar ---------------------------------------------------- */
-  .selbar {
-    display: flex;
+  /* ---- Selection badge (replaces Add URL when selecting) ---------------- */
+  .sel-badge {
+    display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    flex: 1;
-    min-width: 0;
+    flex-shrink: 0;
   }
   .count {
     font-size: var(--text-sm);
