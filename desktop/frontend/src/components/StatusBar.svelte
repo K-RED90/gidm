@@ -1,52 +1,51 @@
 <script lang="ts">
+  import Icon from './Icon.svelte'
   import { store } from '../lib/store.svelte'
   import { humanSpeed } from '../lib/format'
+
+  const total = $derived(store.downloads.length)
+  const shown = $derived(store.filtered.length)
 </script>
 
 <footer class="statusbar">
-  <span class="status" class:up={store.daemonUp}>
-    <span class="dot"></span>
-    {store.daemonUp ? 'Daemon connected' : 'Daemon offline'}
+  <span class="stat">
+    {total}
+    {total === 1 ? 'download' : 'downloads'}{#if shown !== total} · {shown} shown{/if}
   </span>
   <span class="spacer"></span>
-  <span class="stat">{store.downloads.length} {store.downloads.length === 1 ? 'download' : 'downloads'}</span>
-  <span class="stat total-speed">{humanSpeed(store.totalSpeed)}</span>
+  <span class="speed" class:live={store.totalSpeed > 0}>
+    <Icon name="download" size={13} />
+    {humanSpeed(store.totalSpeed)}
+  </span>
 </footer>
 
 <style>
   .statusbar {
-    flex: none;
+    grid-area: statusbar;
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-2) var(--space-5);
+    height: var(--statusbar-h);
+    padding: 0 var(--space-4);
     border-top: 1px solid var(--border);
     background: var(--surface);
     font-size: var(--text-xs);
     color: var(--muted);
   }
-  .status {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: var(--danger);
-  }
-  .status.up .dot {
-    background: var(--success);
+  .stat {
+    font-variant-numeric: tabular-nums;
   }
   .spacer {
     flex: 1;
   }
-  .stat {
+  .speed {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
     font-variant-numeric: tabular-nums;
+    color: var(--muted);
   }
-  .total-speed {
+  .speed.live {
     color: var(--text);
-    font-weight: 600;
   }
 </style>
