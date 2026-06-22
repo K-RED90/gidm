@@ -40,22 +40,24 @@ func TestSetConfigPatchesAndEchoes(t *testing.T) {
 	}
 	_, sock := startServer(t, mgr)
 
-	// Patch only the global rate and the dir; the rest must be left unchanged.
-	dir := "/new"
+	// Patch only the global rate and the dir; the rest must be left unchanged. A real
+	// temp dir is OS-absolute and clean on every platform, so set-config accepts it on
+	// Windows too (a "/new" literal is not absolute there).
+	dir := t.TempDir()
 	rate := 2 << 20
 	resp := roundTrip(t, sock, api.NewSetConfigRequest(api.SetConfig{DownloadDir: &dir, MaxRate: &rate}))
 	if !resp.OK || resp.Config == nil {
 		t.Fatalf("set-config = %+v", resp)
 	}
 	got := resp.Config.Config
-	if got.DownloadDir != "/new" || got.MaxRate != 2<<20 {
+	if got.DownloadDir != dir || got.MaxRate != 2<<20 {
 		t.Errorf("patched fields not applied: %+v", got)
 	}
 	if got.SegmentsPerDownload != 4 || got.DefaultPriority != api.PriorityNormal {
 		t.Errorf("unpatched fields changed: %+v", got)
 	}
 	// The manager must have been told to persist the merged settings.
-	if mgr.settings.DownloadDir != "/new" || mgr.settings.MaxRate != 2<<20 || mgr.settings.SegmentsPerDownload != 4 {
+	if mgr.settings.DownloadDir != dir || mgr.settings.MaxRate != 2<<20 || mgr.settings.SegmentsPerDownload != 4 {
 		t.Errorf("manager settings after set = %+v", mgr.settings)
 	}
 }

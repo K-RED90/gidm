@@ -21,10 +21,10 @@ func TestPlannedDest(t *testing.T) {
 		want     string
 	}{
 		{"both empty defers to probe", "", "", ""},
-		{"dir only keeps url basename", "/srv/dl", "", "/srv/dl/archive.tar.gz"},
-		{"filename only uses default dir", "", "movie.mkv", "/downloads/movie.mkv"},
-		{"dir and filename", "/srv/dl", "movie.mkv", "/srv/dl/movie.mkv"},
-		{"hostile filename sanitized", "/srv/dl", "../../etc/passwd", "/srv/dl/passwd"},
+		{"dir only keeps url basename", "/srv/dl", "", filepath.Join("/srv/dl", "archive.tar.gz")},
+		{"filename only uses default dir", "", "movie.mkv", filepath.Join("/downloads", "movie.mkv")},
+		{"dir and filename", "/srv/dl", "movie.mkv", filepath.Join("/srv/dl", "movie.mkv")},
+		{"hostile filename sanitized", "/srv/dl", "../../etc/passwd", filepath.Join("/srv/dl", "passwd")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

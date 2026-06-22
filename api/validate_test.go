@@ -53,6 +53,10 @@ func TestValidateAddPriority(t *testing.T) {
 
 func TestValidateAddDestination(t *testing.T) {
 	const url = "https://example.com/f"
+	// A real temp dir is an OS-absolute, clean path on every platform, so the
+	// valid-destination cases hold on Windows too — a "/srv/downloads" literal is
+	// neither absolute nor clean there, which the validators correctly reject.
+	validDir := t.TempDir()
 	tests := []struct {
 		name     string
 		dir      string
@@ -60,8 +64,8 @@ func TestValidateAddDestination(t *testing.T) {
 		wantErr  bool
 	}{
 		{"both empty", "", "", false},
-		{"abs dir only", "/srv/downloads", "", false},
-		{"abs dir and plain filename", "/srv/downloads", "movie.mkv", false},
+		{"abs dir only", validDir, "", false},
+		{"abs dir and plain filename", validDir, "movie.mkv", false},
 		{"plain filename only", "", "movie.mkv", false},
 		{"relative dir", "downloads", "", true},
 		{"dir with dotdot", "/srv/../etc", "", true},

@@ -396,14 +396,15 @@ func TestAddForwardsOptions(t *testing.T) {
 	mgr := newFakeManager()
 	_, sock := startServer(t, mgr)
 
+	dir := t.TempDir() // an OS-absolute, clean dir the destination validator accepts on every platform
 	resp := roundTrip(t, sock, api.NewAddRequestWithOptions("https://example.com/f.bin", api.Add{
-		Dir: "/srv/dl", Filename: "chosen.bin", Segments: 12,
+		Dir: dir, Filename: "chosen.bin", Segments: 12,
 	}))
 	if !resp.OK || resp.Add == nil {
 		t.Fatalf("add: %+v", resp)
 	}
-	if got := mgr.lastAddOpts; got.Dir != "/srv/dl" || got.Filename != "chosen.bin" || got.Segments != 12 {
-		t.Errorf("forwarded opts = %+v, want {/srv/dl chosen.bin 12}", got)
+	if got := mgr.lastAddOpts; got.Dir != dir || got.Filename != "chosen.bin" || got.Segments != 12 {
+		t.Errorf("forwarded opts = %+v, want {%s chosen.bin 12}", got, dir)
 	}
 
 	// An invalid destination is rejected with bad_request and never reaches Submit.
