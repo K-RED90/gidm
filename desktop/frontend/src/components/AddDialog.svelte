@@ -409,8 +409,6 @@
   .flabel {
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
     color: var(--muted);
   }
 
@@ -419,8 +417,8 @@
     min-width: 0;
     height: 38px;
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--surface-3);
+    border-radius: 10px;
+    background: var(--surface-2);
     color: var(--text);
     font: inherit;
     font-size: var(--text-md);
@@ -505,8 +503,8 @@
     height: 38px;
     width: fit-content;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-3);
+    border-radius: 999px;
+    background: var(--surface-2);
     overflow: hidden;
   }
   .stepper button {
@@ -546,8 +544,8 @@
     display: flex;
     height: 38px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-3);
+    border-radius: 999px;
+    background: var(--surface-2);
     padding: 3px;
     gap: 3px;
   }

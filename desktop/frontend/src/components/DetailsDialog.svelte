@@ -436,6 +436,9 @@
     flex-direction: column;
     gap: 2px;
     min-width: 0;
+    padding: 10px 12px;
+    background: var(--surface-3);
+    border-radius: 8px;
   }
   .props .wide {
     grid-column: 1 / -1;
