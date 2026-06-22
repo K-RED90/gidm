@@ -236,6 +236,18 @@ class AppStore {
     }
   }
 
+  // restart re-downloads from scratch: it discards the partial progress and
+  // re-queues the download from the beginning (the daemon aborts it first if it is
+  // running). Refreshes so the reset progress shows at once.
+  async restart(id: string): Promise<void> {
+    try {
+      await Bridge.Restart(id)
+      await this.refresh()
+    } catch (e) {
+      toaster.error(`Could not restart: ${errMessage(e)}`)
+    }
+  }
+
   // pauseAll / resumeAll are the toolbar's global actions; each fans out over the
   // matching downloads and refreshes once at the end.
   async pauseAll(): Promise<void> {

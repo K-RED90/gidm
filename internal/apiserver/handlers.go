@@ -90,6 +90,22 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		}
 		return api.OKResponse(), verb, id
 
+	case api.OpRestart:
+		if req.Restart == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing restart payload"), verb, ""
+		}
+		if err := api.ValidateID(req.Restart.ID); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		id = req.Restart.ID
+		// restart discards the download's progress (checkpoints and .part file) and
+		// re-queues it to download from the beginning, in contrast to resume, which
+		// continues from the last checkpoint.
+		if err := s.mgr.Restart(ctx, id); err != nil {
+			return s.toResponse(err), verb, id
+		}
+		return api.OKResponse(), verb, id
+
 	case api.OpRm:
 		if req.Rm == nil {
 			return api.ErrorResponse(api.CodeBadRequest, "missing rm payload"), verb, ""

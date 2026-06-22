@@ -84,6 +84,11 @@ func (b *Bridge) Pause(id string) error { return b.ack(api.NewPauseRequest(id)) 
 // Resume re-queues a paused/failed/completed download.
 func (b *Bridge) Resume(id string) error { return b.ack(api.NewResumeRequest(id)) }
 
+// Restart re-downloads from scratch: it discards the download's partial progress
+// (checkpoints and .part file) and re-queues it from the beginning. Unlike Resume,
+// it refetches every byte.
+func (b *Bridge) Restart(id string) error { return b.ack(api.NewRestartRequest(id)) }
+
 // Remove deletes a download.
 func (b *Bridge) Remove(id string) error { return b.ack(api.NewRmRequest(id)) }
 

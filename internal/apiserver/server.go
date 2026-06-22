@@ -36,6 +36,7 @@ type Manager interface {
 	Get(ctx context.Context, id string) (*engine.Download, error)
 	Pause(ctx context.Context, id string) error
 	Resume(ctx context.Context, id string) error
+	Restart(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	SetPriority(ctx context.Context, id string, priority engine.Priority) error
 	SetRate(ctx context.Context, id string, bps int) error

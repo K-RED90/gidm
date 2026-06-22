@@ -15,6 +15,7 @@ const (
 	OpStatus      Op = "status"
 	OpPause       Op = "pause"
 	OpResume      Op = "resume"
+	OpRestart     Op = "restart" // discard progress and re-download from scratch
 	OpRm          Op = "rm"
 	OpSetPriority Op = "set-priority"
 	OpSetRate     Op = "set-rate"   // per-download bandwidth cap
@@ -35,6 +36,7 @@ type Request struct {
 	Status      *Status      `json:"status,omitempty"`
 	Pause       *Pause       `json:"pause,omitempty"`
 	Resume      *Resume      `json:"resume,omitempty"`
+	Restart     *Restart     `json:"restart,omitempty"`
 	Rm          *Rm          `json:"rm,omitempty"`
 	SetPriority *SetPriority `json:"set_priority,omitempty"`
 	SetRate     *SetRate     `json:"set_rate,omitempty"`
@@ -66,6 +68,13 @@ type Pause struct {
 }
 
 type Resume struct {
+	ID string `json:"id"`
+}
+
+// Restart re-downloads a download from the beginning, discarding its partial
+// progress (checkpoints and the .part file). Distinct from Resume, which
+// continues from the last checkpoint.
+type Restart struct {
 	ID string `json:"id"`
 }
 
@@ -129,6 +138,10 @@ func NewPauseRequest(id string) Request {
 
 func NewResumeRequest(id string) Request {
 	return Request{Version: Version, Op: OpResume, Resume: &Resume{ID: id}}
+}
+
+func NewRestartRequest(id string) Request {
+	return Request{Version: Version, Op: OpRestart, Restart: &Restart{ID: id}}
 }
 
 func NewRmRequest(id string) Request {

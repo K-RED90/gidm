@@ -74,6 +74,15 @@ export function Remove(id: string): $CancellablePromise<void> {
 }
 
 /**
+ * Restart re-downloads from scratch: it discards the download's partial progress
+ * (checkpoints and .part file) and re-queues it from the beginning. Unlike Resume,
+ * it refetches every byte.
+ */
+export function Restart(id: string): $CancellablePromise<void> {
+    return $Call.ByID(1589129447, id);
+}
+
+/**
  * Resume re-queues a paused/failed/completed download.
  */
 export function Resume(id: string): $CancellablePromise<void> {

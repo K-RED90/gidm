@@ -122,6 +122,21 @@ func TestBridgeSetRate(t *testing.T) {
 	}
 }
 
+func TestBridgeRestart(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.OKResponse()
+	})
+	if err := b.Restart("d1"); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	got := <-reqs
+	if got.Op != api.OpRestart || got.Restart == nil || got.Restart.ID != "d1" {
+		t.Errorf("forwarded restart = %+v (op %q), want {d1}", got.Restart, got.Op)
+	}
+}
+
 func TestBridgeGetConfig(t *testing.T) {
 	want := api.ConfigView{
 		DownloadDir:         "/srv/dl",

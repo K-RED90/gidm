@@ -128,6 +128,7 @@
       { kind: 'submenu', label: 'Set Priority', icon: 'sliders', items: priorityMenuItems() },
     ]
     if (n === 1) {
+      items.push({ kind: 'item', label: 'Restart', icon: 'refresh', run: () => void store.restart(d.id) })
       items.push({ kind: 'submenu', label: 'Limit speed', icon: 'gauge', items: rateMenuItems(d) })
       items.push({ kind: 'sep' })
       if (d.status === DownloadStatus.StatusCompleted) {

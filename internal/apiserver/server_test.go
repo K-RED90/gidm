@@ -32,6 +32,7 @@ type fakeManager struct {
 	listErr        error
 	pauseErr       error
 	resumeErr      error
+	restartErr     error
 	deleteErr      error
 	setPriorityErr error
 	setRateErr     error
@@ -117,6 +118,21 @@ func (f *fakeManager) Pause(_ context.Context, id string) error {
 
 func (f *fakeManager) Resume(_ context.Context, id string) error {
 	return f.setStatus(id, engine.StatusQueued, f.resumeErr)
+}
+
+func (f *fakeManager) Restart(_ context.Context, id string) error {
+	if f.restartErr != nil {
+		return f.restartErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.downloads[id]
+	if !ok {
+		return engine.ErrNotFound
+	}
+	d.Status = engine.StatusQueued
+	d.Segments = nil
+	return nil
 }
 
 func (f *fakeManager) Delete(_ context.Context, id string) error {
@@ -308,6 +324,14 @@ func TestRoundTripAllVerbs(t *testing.T) {
 		t.Fatalf("after resume status = %q, want queued", r.Status.Download.Status)
 	}
 
+	// restart -> ok, re-queues the download from scratch
+	if r := roundTrip(t, sock, api.NewRestartRequest(id)); !r.OK {
+		t.Fatalf("restart: got %+v", r)
+	}
+	if r := roundTrip(t, sock, api.NewStatusRequest(id)); r.Status.Download.Status != api.StatusQueued {
+		t.Fatalf("after restart status = %q, want queued", r.Status.Download.Status)
+	}
+
 	// rm deletes the download outright; a later status is not_found
 	if r := roundTrip(t, sock, api.NewRmRequest(id)); !r.OK {
 		t.Fatalf("rm: got %+v", r)
@@ -336,6 +360,9 @@ func TestErrorCodes(t *testing.T) {
 		{"empty id status", api.NewStatusRequest("   "), api.CodeBadRequest},
 		{"not found status", api.NewStatusRequest("missing"), api.CodeNotFound},
 		{"not found pause", api.NewPauseRequest("missing"), api.CodeNotFound},
+		{"restart empty id", api.NewRestartRequest("  "), api.CodeBadRequest},
+		{"restart not found", api.NewRestartRequest("missing"), api.CodeNotFound},
+		{"restart missing payload", api.Request{Version: api.Version, Op: api.OpRestart}, api.CodeBadRequest},
 		{"unknown op", api.Request{Version: api.Version, Op: "frobnicate"}, api.CodeBadRequest},
 		{"bad version", api.Request{Version: 999, Op: api.OpPing}, api.CodeUnsupportedVersion},
 		{"missing add payload", api.Request{Version: api.Version, Op: api.OpAdd}, api.CodeBadRequest},

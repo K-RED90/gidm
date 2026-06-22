@@ -158,6 +158,13 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 		}
 		return runCommand(c, asJSON, stdout, stderr, api.NewResumeRequest(id),
 			func(w io.Writer, r api.Response) error { return renderAck(w, r, "resumed", id, asJSON) })
+	case "restart":
+		id, code := oneArg(stderr, "restart", "<id>", rest)
+		if code != exitOK {
+			return code
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewRestartRequest(id),
+			func(w io.Writer, r api.Response) error { return renderAck(w, r, "restarting", id, asJSON) })
 	case "rm":
 		id, code := oneArg(stderr, "rm", "<id>", rest)
 		if code != exitOK {
@@ -377,6 +384,7 @@ func usage(w io.Writer, gf *flag.FlagSet) {
 	_, _ = fmt.Fprintln(w, "  status <id>                show one download (alias: get)")
 	_, _ = fmt.Fprintln(w, "  pause <id>                 pause a download")
 	_, _ = fmt.Fprintln(w, "  resume <id>                resume a paused download")
+	_, _ = fmt.Fprintln(w, "  restart <id>               re-download from scratch (discards partial progress)")
 	_, _ = fmt.Fprintln(w, "  rm <id>                    remove a download (deletes it; a completed file is kept)")
 	_, _ = fmt.Fprintln(w, "  set-priority <id> <L>      change priority (L: low|normal|high)")
 	_, _ = fmt.Fprintln(w, "  set-rate [--max-rate=N] <id>  cap one download to N bytes/sec (0 removes)")

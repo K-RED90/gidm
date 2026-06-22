@@ -47,7 +47,7 @@ is a local dev convenience and is gitignored.
   the binary beside the app or on `PATH`), so the app works without a hand-launched
   daemon. It never stops gidmd — downloads keep running in the background.
 - `bridge` — the Wails-bound service (`Add`/`List`/`Status`/`Pause`/`Resume`/
-  `Remove`/`Health`). GUI-free, so it's unit-tested without CGO.
+  `Restart`/`Remove`/`Health`). GUI-free, so it's unit-tested without CGO.
 - `main.go` — the Wails wiring: window, native app menu (gives the URL field
   Cmd+C/V/A), single-instance lock, system tray (close-to-tray), and the event
   pump that polls a snapshot each second, pushes it to the UI, and fires
@@ -65,5 +65,6 @@ is a local dev convenience and is gitignored.
 - A toolbar Settings panel edits the daemon's runtime config (download folder,
   default connections/priority, and the global + per-download speed caps) over the
   `get-config`/`set-config` protocol; the right-click "Limit speed" submenu caps a
-  single download live (`set-rate`). Changes persist in the store and survive a
-  restart. The Chrome extension (M4) is the remaining future work.
+  single download live (`set-rate`), and right-click "Restart" re-downloads a file
+  from scratch (`restart`), discarding its partial progress. Changes persist in the
+  store and survive a restart. The Chrome extension (M4) is the remaining future work.
