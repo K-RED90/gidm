@@ -602,16 +602,18 @@ func (e *Engine) planFor(probe ProbeInfo) []Segment {
 	return planSegments(probe.Size, e.cfg.SegmentsPerDownload)
 }
 
-// openPart opens (and, when fresh and sized, truncates) the .part file. For a
-// known total size it is truncated to TotalSize so each segment can WriteAt its
-// own offset into a pre-sized file; for an unknown size it grows sequentially.
+// openPart opens (and, when fresh and sized, preallocates) the .part file. For a
+// known total size it reserves TotalSize up front so each segment can WriteAt its
+// own offset into a pre-sized file — reserving real blocks where the platform
+// supports it, so a disk that is too small fails here rather than mid-download.
+// For an unknown size it grows sequentially.
 func openPart(path string, dl *Download, fresh bool) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("engine: open part %q: %w", path, err)
 	}
 	if fresh && dl.TotalSize > 0 {
-		if err := f.Truncate(dl.TotalSize); err != nil {
+		if err := preallocate(f, dl.TotalSize); err != nil {
 			_ = f.Close()
 			return nil, fmt.Errorf("engine: size part %q: %w", path, err)
 		}
