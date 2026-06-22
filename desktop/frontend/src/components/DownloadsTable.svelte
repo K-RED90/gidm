@@ -77,6 +77,8 @@
     }
   }
 
+  const selecting = $derived(store.selectedIds.size > 0)
+
   // segView builds the IDM-style per-connection slices: one slice per segment,
   // sized to its share of the file and filled to its own progress. Returns null
   // when there is nothing useful to show (single segment, no segments yet, or an
@@ -332,21 +334,23 @@
               </span>
             </td>
             <td class="col-actions">
-              <div class="actions">
-                {#if PAUSABLE.has(d.status)}
-                  <button title="Pause" onclick={() => act(Bridge.Pause, d.id)} aria-label="Pause">
-                    <Icon name="pause" size={14} />
+              {#if !selecting}
+                <div class="actions">
+                  {#if PAUSABLE.has(d.status)}
+                    <button title="Pause" onclick={() => act(Bridge.Pause, d.id)} aria-label="Pause">
+                      <Icon name="pause" size={14} />
+                    </button>
+                  {/if}
+                  {#if RESUMABLE.has(d.status)}
+                    <button title="Resume" onclick={() => act(Bridge.Resume, d.id)} aria-label="Resume">
+                      <Icon name="play" size={14} />
+                    </button>
+                  {/if}
+                  <button class="danger" title="Remove" onclick={() => act(Bridge.Remove, d.id)} aria-label="Remove">
+                    <Icon name="trash" size={14} />
                   </button>
-                {/if}
-                {#if RESUMABLE.has(d.status)}
-                  <button title="Resume" onclick={() => act(Bridge.Resume, d.id)} aria-label="Resume">
-                    <Icon name="play" size={14} />
-                  </button>
-                {/if}
-                <button class="danger" title="Remove" onclick={() => act(Bridge.Remove, d.id)} aria-label="Remove">
-                  <Icon name="trash" size={14} />
-                </button>
-              </div>
+                </div>
+              {/if}
             </td>
           </tr>
         {/each}

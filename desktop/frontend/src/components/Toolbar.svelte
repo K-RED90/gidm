@@ -77,26 +77,6 @@
       <Icon name="plus" size={14} />
       Add URL
     </button>
-    <button
-      class="ghost"
-      disabled={!store.hasPaused || !store.daemonUp}
-      onclick={() => store.resumeAll()}
-      title="Resume all paused"
-      aria-label="Resume all paused"
-    >
-      <Icon name="play" size={14} />
-      <span class="lbl">Resume all</span>
-    </button>
-    <button
-      class="ghost"
-      disabled={!store.hasActive || !store.daemonUp}
-      onclick={() => store.pauseAll()}
-      title="Pause all active"
-      aria-label="Pause all active"
-    >
-      <Icon name="pause" size={14} />
-      <span class="lbl">Pause all</span>
-    </button>
   </div>
 
   <span class="spacer"></span>
@@ -144,6 +124,33 @@
       </div>
     {/if}
   </div>
+
+  <span class="divider" aria-hidden="true"></span>
+
+  <div class="group" style="--wails-draggable: no-drag">
+    <button
+      class="ghost"
+      disabled={!store.hasPaused || !store.daemonUp}
+      onclick={() => store.resumeAll()}
+      title="Resume all paused"
+      aria-label="Resume all paused"
+    >
+      <Icon name="play" size={14} />
+      <span class="lbl">Resume all</span>
+    </button>
+    <button
+      class="ghost"
+      disabled={!store.hasActive || !store.daemonUp}
+      onclick={() => store.pauseAll()}
+      title="Pause all active"
+      aria-label="Pause all active"
+    >
+      <Icon name="pause" size={14} />
+      <span class="lbl">Pause all</span>
+    </button>
+  </div>
+
+  <span class="divider" aria-hidden="true"></span>
 
   <button
     class="ghost gear"
@@ -275,6 +282,13 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border-strong);
+    flex-shrink: 0;
   }
 
   .search {
