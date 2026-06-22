@@ -59,7 +59,7 @@ func TestBridgeAdd(t *testing.T) {
 		reqs <- r
 		return api.AddResponse("abc")
 	})
-	id, err := b.Add("https://x/y", "/srv/dl", "movie.mkv", 8, api.PriorityHigh)
+	id, err := b.Add("https://x/y", "/srv/dl", "movie.mkv", 8, api.PriorityHigh, api.Credentials{})
 	if err != nil || id != "abc" {
 		t.Fatalf("Add = (%q, %v), want (abc, nil)", id, err)
 	}
@@ -71,6 +71,30 @@ func TestBridgeAdd(t *testing.T) {
 		got.Add.Filename != "movie.mkv" || got.Add.Segments != 8 || got.Add.Priority != api.PriorityHigh {
 		t.Errorf("forwarded add = %+v, want url/dir/filename/segments/priority all set", got.Add)
 	}
+	if got.Add.Auth != nil {
+		t.Errorf("forwarded add Auth = %+v, want nil for empty credentials", got.Add.Auth)
+	}
+}
+
+// TestBridgeAddWithAuth verifies credentials ride along only when set, and as a
+// non-nil Add.Auth on the wire.
+func TestBridgeAddWithAuth(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.AddResponse("a2")
+	})
+	creds := api.Credentials{Username: "u", Password: "p", Referer: "https://ref/"}
+	if _, err := b.Add("https://x/y", "", "", 0, "", creds); err != nil {
+		t.Fatalf("Add with auth: %v", err)
+	}
+	got := <-reqs
+	if got.Add == nil || got.Add.Auth == nil {
+		t.Fatalf("forwarded add.Auth = nil, want credentials")
+	}
+	if got.Add.Auth.Username != "u" || got.Add.Auth.Password != "p" || got.Add.Auth.Referer != "https://ref/" {
+		t.Errorf("forwarded auth = %+v", got.Add.Auth)
+	}
 }
 
 // TestBridgeAddQuick guards the quick-add path: zero overrides reproduce the
@@ -81,7 +105,7 @@ func TestBridgeAddQuick(t *testing.T) {
 		reqs <- r
 		return api.AddResponse("q1")
 	})
-	if _, err := b.Add("https://x/y", "", "", 0, ""); err != nil {
+	if _, err := b.Add("https://x/y", "", "", 0, "", api.Credentials{}); err != nil {
 		t.Fatalf("Add (quick): %v", err)
 	}
 	got := <-reqs
@@ -178,6 +202,22 @@ func TestBridgeSetConfig(t *testing.T) {
 		sc.DefaultPriority == nil || *sc.DefaultPriority != api.PriorityNormal ||
 		sc.MaxRate == nil || *sc.MaxRate != 2<<20 || sc.PerDownloadMaxRate == nil || *sc.PerDownloadMaxRate != 0 {
 		t.Errorf("forwarded set-config = %+v, want all fields populated", sc)
+	}
+}
+
+func TestBridgeSetAuth(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.OKResponse()
+	})
+	if err := b.SetAuth("d1", api.Credentials{Username: "u", Referer: "https://ref/"}, true); err != nil {
+		t.Fatalf("SetAuth: %v", err)
+	}
+	got := <-reqs
+	if got.Op != api.OpSetAuth || got.SetAuth == nil || got.SetAuth.ID != "d1" ||
+		!got.SetAuth.KeepPassword || got.SetAuth.Auth.Username != "u" {
+		t.Errorf("forwarded set-auth = %+v (op %q), want {d1 keepPassword u}", got.SetAuth, got.Op)
 	}
 }
 

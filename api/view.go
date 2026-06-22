@@ -61,6 +61,23 @@ type DownloadView struct {
 	// included only for in-flight downloads there; the status endpoint always
 	// includes it.
 	Segments []SegmentView `json:"segments,omitempty"`
+
+	// Auth is the non-secret projection of the download's stored credentials, for
+	// the properties view's editable auth section. nil when no credentials are
+	// stored. The password is never included — only AuthView.HasPassword.
+	Auth *AuthView `json:"auth,omitempty"`
+}
+
+// AuthView is the read-side projection of a download's stored credentials. The
+// password is deliberately omitted — HasPassword reports only its presence — so
+// a client, log, or screenshot never exposes it; the other fields are returned
+// so the properties dialog can pre-fill them for editing.
+type AuthView struct {
+	Username    string            `json:"username,omitempty"`
+	Referer     string            `json:"referer,omitempty"`
+	Cookie      string            `json:"cookie,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	HasPassword bool              `json:"has_password,omitempty"`
 }
 
 // SegmentView is one parallel connection's byte range and live downloaded count.
@@ -69,9 +86,10 @@ type DownloadView struct {
 // connection's progress as Completed/(End-Start+1).
 type SegmentView struct {
 	Index     int   `json:"index"`
-	Start     int64 `json:"start"`     // inclusive
-	End       int64 `json:"end"`       // inclusive
-	Completed int64 `json:"completed"` // bytes written within the range
+	Start     int64 `json:"start"`               // inclusive
+	End       int64 `json:"end"`                 // inclusive
+	Completed int64 `json:"completed"`           // bytes written within the range
+	SpeedBps  int64 `json:"speed_bps,omitempty"` // this connection's live rate, 0 when idle
 }
 
 type AddResult struct {

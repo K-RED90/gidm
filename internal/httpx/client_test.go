@@ -99,7 +99,7 @@ func TestNewAppliesUserAgentToEveryRequest(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{UserAgent: "gidm-ua/9.9"}, testDownload(0, time.Millisecond))
-	if _, err := c.Probe(context.Background(), srv.URL); err != nil {
+	if _, err := c.Probe(context.Background(), srv.URL, RequestOptions{}); err != nil {
 		t.Fatalf("Probe: %v", err)
 	}
 	if got != "gidm-ua/9.9" {

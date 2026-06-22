@@ -37,6 +37,7 @@ type fakeManager struct {
 	setPriorityErr error
 	setRateErr     error
 	setSettingsErr error
+	setAuthErr     error
 
 	// settings is what Settings() returns and SetSettings() stores; the zero value
 	// has DefaultPriority == PriorityNormal, matching the old New default.
@@ -190,6 +191,20 @@ func (f *fakeManager) SetSettings(_ context.Context, s engine.Settings) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.settings = s
+	return nil
+}
+
+func (f *fakeManager) SetAuth(_ context.Context, id string, auth *engine.RequestOptions) error {
+	if f.setAuthErr != nil {
+		return f.setAuthErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.downloads[id]
+	if !ok {
+		return engine.ErrNotFound
+	}
+	d.Auth = auth
 	return nil
 }
 

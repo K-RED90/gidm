@@ -130,7 +130,7 @@ type fakeFetcher struct {
 	failOnce atomic.Bool
 }
 
-func (f *fakeFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
+func (f *fakeFetcher) Probe(_ context.Context, url string, _ RequestOptions) (ProbeInfo, error) {
 	size := int64(-1)
 	if f.sizeKnown {
 		size = int64(len(f.content))
@@ -145,7 +145,7 @@ func (f *fakeFetcher) Probe(_ context.Context, url string) (ProbeInfo, error) {
 	}, nil
 }
 
-func (f *fakeFetcher) RangeGet(_ context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *fakeFetcher) RangeGet(_ context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	f.mu.Lock()
 	f.rangeReqs = append(f.rangeReqs, [2]int64{start, end})
 	f.mu.Unlock()
@@ -157,7 +157,7 @@ func (f *fakeFetcher) RangeGet(_ context.Context, _ string, start, end int64) (i
 	return f.wrap(chunk), nil
 }
 
-func (f *fakeFetcher) Get(_ context.Context, _ string) (io.ReadCloser, error) {
+func (f *fakeFetcher) Get(_ context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	f.mu.Lock()
 	f.getCalls++
 	f.mu.Unlock()
@@ -458,13 +458,13 @@ type alwaysFailingFetcher struct {
 	failAt  int64
 }
 
-func (f *alwaysFailingFetcher) Probe(context.Context, string) (ProbeInfo, error) {
+func (f *alwaysFailingFetcher) Probe(context.Context, string, RequestOptions) (ProbeInfo, error) {
 	return ProbeInfo{FinalURL: "u", Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: "bad.bin"}, nil
 }
-func (f *alwaysFailingFetcher) RangeGet(_ context.Context, _ string, start, _ int64) (io.ReadCloser, error) {
+func (f *alwaysFailingFetcher) RangeGet(_ context.Context, _ string, start, _ int64, _ RequestOptions) (io.ReadCloser, error) {
 	return &failingBody{data: f.content[start:], failAt: f.failAt}, nil
 }
-func (f *alwaysFailingFetcher) Get(context.Context, string) (io.ReadCloser, error) {
+func (f *alwaysFailingFetcher) Get(context.Context, string, RequestOptions) (io.ReadCloser, error) {
 	return &failingBody{data: f.content, failAt: f.failAt}, nil
 }
 
@@ -657,13 +657,13 @@ type blockingFetcher struct {
 	release chan struct{}
 }
 
-func (f *blockingFetcher) Probe(context.Context, string) (ProbeInfo, error) {
+func (f *blockingFetcher) Probe(context.Context, string, RequestOptions) (ProbeInfo, error) {
 	return ProbeInfo{FinalURL: "u", Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: "block.bin"}, nil
 }
-func (f *blockingFetcher) RangeGet(ctx context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *blockingFetcher) RangeGet(ctx context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	return &blockingBody{ctx: ctx, release: f.release, data: f.content[start : end+1]}, nil
 }
-func (f *blockingFetcher) Get(ctx context.Context, _ string) (io.ReadCloser, error) {
+func (f *blockingFetcher) Get(ctx context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	return &blockingBody{ctx: ctx, release: f.release, data: f.content}, nil
 }
 
@@ -825,11 +825,11 @@ type shortRangeFetcher struct {
 	short   int64
 }
 
-func (f *shortRangeFetcher) Probe(context.Context, string) (ProbeInfo, error) {
+func (f *shortRangeFetcher) Probe(context.Context, string, RequestOptions) (ProbeInfo, error) {
 	return ProbeInfo{FinalURL: "u", Size: int64(len(f.content)), SupportsRanges: true, ETag: `"v1"`, Filename: "short.bin"}, nil
 }
 
-func (f *shortRangeFetcher) RangeGet(_ context.Context, _ string, start, end int64) (io.ReadCloser, error) {
+func (f *shortRangeFetcher) RangeGet(_ context.Context, _ string, start, end int64, _ RequestOptions) (io.ReadCloser, error) {
 	n := end - start + 1
 	if n > f.short {
 		n = f.short // truncate the body to a clean, short EOF
@@ -839,7 +839,7 @@ func (f *shortRangeFetcher) RangeGet(_ context.Context, _ string, start, end int
 	return io.NopCloser(&bytesReader{data: chunk}), nil
 }
 
-func (f *shortRangeFetcher) Get(_ context.Context, _ string) (io.ReadCloser, error) {
+func (f *shortRangeFetcher) Get(_ context.Context, _ string, _ RequestOptions) (io.ReadCloser, error) {
 	chunk := make([]byte, f.short)
 	copy(chunk, f.content)
 	return io.NopCloser(&bytesReader{data: chunk}), nil
@@ -889,13 +889,13 @@ type shortWholeBodyFetcher struct {
 	short   int64
 }
 
-func (f *shortWholeBodyFetcher) Probe(context.Context, string) (ProbeInfo, error) {
+func (f *shortWholeBodyFetcher) Probe(context.Context, string, RequestOptions) (ProbeInfo, error) {
 	return ProbeInfo{FinalURL: "u", Size: int64(len(f.content)), SupportsRanges: false, Filename: "sw.bin"}, nil
 }
-func (f *shortWholeBodyFetcher) RangeGet(context.Context, string, int64, int64) (io.ReadCloser, error) {
+func (f *shortWholeBodyFetcher) RangeGet(context.Context, string, int64, int64, RequestOptions) (io.ReadCloser, error) {
 	return nil, errors.New("ranges unsupported")
 }
-func (f *shortWholeBodyFetcher) Get(context.Context, string) (io.ReadCloser, error) {
+func (f *shortWholeBodyFetcher) Get(context.Context, string, RequestOptions) (io.ReadCloser, error) {
 	chunk := make([]byte, f.short)
 	copy(chunk, f.content)
 	return io.NopCloser(&bytesReader{data: chunk}), nil

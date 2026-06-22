@@ -73,7 +73,7 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 		// body read it returns is bound to the same context and a stall cancel
 		// unblocks a wedged read.
 		attemptCtx, cancelAttempt := context.WithCancel(ctx)
-		body, err := e.fetcher.RangeGet(attemptCtx, dl.URL, from, end)
+		body, err := e.fetcher.RangeGet(attemptCtx, dl.URL, from, end, requestOptions(dl))
 		if err != nil {
 			cancelAttempt()
 			if ctx.Err() != nil {
@@ -181,7 +181,7 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 		prog.store(0, 0)
 
 		attemptCtx, cancelAttempt := context.WithCancel(ctx)
-		body, err := e.fetcher.Get(attemptCtx, dl.URL)
+		body, err := e.fetcher.Get(attemptCtx, dl.URL, requestOptions(dl))
 		if err != nil {
 			cancelAttempt()
 			if ctx.Err() != nil {

@@ -33,6 +33,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 			Dir:      req.Add.Dir,
 			Filename: req.Add.Filename,
 			Segments: req.Add.Segments,
+			Auth:     toRequestOptions(req.Add.Auth),
 		})
 		if err != nil {
 			return s.toResponse(err), verb, ""
@@ -148,6 +149,23 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		}
 		return api.OKResponse(), verb, id
 
+	case api.OpSetAuth:
+		if req.SetAuth == nil {
+			return api.ErrorResponse(api.CodeBadRequest, "missing set_auth payload"), verb, ""
+		}
+		if err := api.ValidateSetAuth(*req.SetAuth); err != nil {
+			return s.toResponse(err), verb, ""
+		}
+		id = req.SetAuth.ID
+		opts, err := s.resolveSetAuth(ctx, req.SetAuth)
+		if err != nil {
+			return s.toResponse(err), verb, id
+		}
+		if err := s.mgr.SetAuth(ctx, id, opts); err != nil {
+			return s.toResponse(err), verb, id
+		}
+		return api.OKResponse(), verb, id
+
 	case api.OpGetConfig:
 		return api.ConfigResponse(toConfigView(s.mgr.Settings())), verb, ""
 
@@ -199,12 +217,58 @@ func (s *Server) toResponse(err error) api.Response {
 		return api.ErrorResponse(api.CodeBadRequest, "segments must be between 0 and 64")
 	case errors.Is(err, api.ErrInvalidRate):
 		return api.ErrorResponse(api.CodeBadRequest, "rate must be a non-negative number of bytes per second")
+	case errors.Is(err, api.ErrInvalidCredentials):
+		return api.ErrorResponse(api.CodeBadRequest, "credentials contain an invalid header or control character")
 	default:
 		// ErrManagerClosed and any unanticipated failure fall here: log the detail,
 		// return a generic message.
 		s.logger.Error("apiserver: request failed", "err", err)
 		return api.ErrorResponse(api.CodeInternal, "internal error")
 	}
+}
+
+// toRequestOptions converts wire credentials to the engine's request options,
+// returning nil when no field is set so an empty payload stores no auth rather
+// than an empty record.
+func toRequestOptions(c *api.Credentials) *engine.RequestOptions {
+	if c == nil || c.IsZero() {
+		return nil
+	}
+	return &engine.RequestOptions{
+		Username: c.Username,
+		Password: c.Password,
+		Referer:  c.Referer,
+		Cookie:   c.Cookie,
+		Headers:  c.Headers,
+	}
+}
+
+// resolveSetAuth builds the request options for a set-auth, honoring KeepPassword
+// by carrying the download's currently stored password forward — the wire never
+// echoes a password back, so an editor that leaves it unchanged sends none. The
+// result is nil when nothing remains set, which clears the download's auth.
+func (s *Server) resolveSetAuth(ctx context.Context, sa *api.SetAuth) (*engine.RequestOptions, error) {
+	opts := engine.RequestOptions{
+		Username: sa.Auth.Username,
+		Password: sa.Auth.Password,
+		Referer:  sa.Auth.Referer,
+		Cookie:   sa.Auth.Cookie,
+		Headers:  sa.Auth.Headers,
+	}
+	if sa.KeepPassword {
+		cur, err := s.mgr.Get(ctx, sa.ID)
+		if err != nil {
+			return nil, err
+		}
+		opts.Password = ""
+		if cur.Auth != nil {
+			opts.Password = cur.Auth.Password
+		}
+	}
+	if opts.IsZero() {
+		return nil, nil
+	}
+	return &opts, nil
 }
 
 // newLimitedReader caps a request frame at max bytes. Reading past the cap

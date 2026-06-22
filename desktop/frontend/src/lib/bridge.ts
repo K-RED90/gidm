@@ -4,10 +4,16 @@
 // from here, so the generated paths live in exactly one place.
 import { Clipboard, Dialogs, Events } from '@wailsio/runtime'
 import { Bridge } from '../../bindings/github.com/K-RED90/gidm/desktop/bridge'
-import { DownloadStatus, Priority, type DownloadView } from '../../bindings/github.com/K-RED90/gidm/api'
+import {
+  DownloadStatus,
+  Priority,
+  type DownloadView,
+  type Credentials,
+  type AuthView,
+} from '../../bindings/github.com/K-RED90/gidm/api'
 
 export { Bridge, DownloadStatus, Priority }
-export type { DownloadView }
+export type { DownloadView, Credentials, AuthView }
 
 // copyText puts text on the system clipboard (used by the row "Copy URL" action).
 // Clipboard is the frontend Wails runtime module, so no Go round-trip is needed.

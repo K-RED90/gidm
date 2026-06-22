@@ -21,7 +21,7 @@ func TestRangeGetReturnsRequestedBytes(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	resp, err := c.RangeGet(context.Background(), srv.URL, 4, 9)
+	resp, err := c.RangeGet(context.Background(), srv.URL, 4, 9, RequestOptions{})
 	if err != nil {
 		t.Fatalf("RangeGet: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestRangeGetRejects200(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	resp, err := c.RangeGet(context.Background(), srv.URL, 0, 5)
+	resp, err := c.RangeGet(context.Background(), srv.URL, 0, 5, RequestOptions{})
 	if !errors.Is(err, ErrRangeNotSatisfied) {
 		closeBody(t, resp)
 		t.Fatalf("err = %v, want ErrRangeNotSatisfied", err)
@@ -62,7 +62,7 @@ func TestRangeGetValidatesContentRangeStart(t *testing.T) {
 	defer srv.Close()
 
 	c := newServerClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	resp, err := c.RangeGet(context.Background(), srv.URL, 4, 9)
+	resp, err := c.RangeGet(context.Background(), srv.URL, 4, 9, RequestOptions{})
 	if err == nil {
 		closeBody(t, resp)
 		t.Fatal("RangeGet: expected error on mismatched Content-Range start")
@@ -71,10 +71,10 @@ func TestRangeGetValidatesContentRangeStart(t *testing.T) {
 
 func TestRangeGetRejectsInvalidArgs(t *testing.T) {
 	c := newTestClient(t, config.Network{}, testDownload(0, time.Millisecond))
-	if _, err := c.RangeGet(context.Background(), "http://x/", -1, 5); err == nil {
+	if _, err := c.RangeGet(context.Background(), "http://x/", -1, 5, RequestOptions{}); err == nil {
 		t.Error("RangeGet(-1, 5): expected error")
 	}
-	if _, err := c.RangeGet(context.Background(), "http://x/", 10, 5); err == nil {
+	if _, err := c.RangeGet(context.Background(), "http://x/", 10, 5, RequestOptions{}); err == nil {
 		t.Error("RangeGet(10, 5): expected error")
 	}
 }

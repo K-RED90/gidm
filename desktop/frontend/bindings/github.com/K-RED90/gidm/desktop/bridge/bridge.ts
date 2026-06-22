@@ -18,12 +18,12 @@ import * as api$0 from "../../api/models.js";
 
 /**
  * Add submits a download and returns its new id. dir, filename, and segments are
- * optional overrides (empty string / 0 means "let the daemon decide"), so the
- * frontend's quick-add path can pass ("", "", 0, "") and behave exactly as the
- * bare-URL form did.
+ * optional overrides (empty string / 0 means "let the daemon decide"); auth is
+ * optional request credentials, sent only when non-empty, so the quick-add path
+ * can pass zero values and behave exactly as the bare-URL form did.
  */
-export function Add(url: string, dir: string, filename: string, segments: number, priority: api$0.Priority): $CancellablePromise<string> {
-    return $Call.ByID(3931086631, url, dir, filename, segments, priority);
+export function Add(url: string, dir: string, filename: string, segments: number, priority: api$0.Priority, auth: api$0.Credentials): $CancellablePromise<string> {
+    return $Call.ByID(3931086631, url, dir, filename, segments, priority, auth);
 }
 
 /**
@@ -95,6 +95,16 @@ export function Resume(id: string): $CancellablePromise<void> {
  */
 export function RevealInFolder(path: string): $CancellablePromise<void> {
     return $Call.ByID(2540813946, path);
+}
+
+/**
+ * SetAuth replaces a download's request credentials so a 401'd or hotlink-blocked
+ * download can be fixed and resumed. keepPassword=true keeps the stored password
+ * and applies only auth's other fields — the wire never echoes a password back,
+ * so the properties editor leaves it blank when unchanged.
+ */
+export function SetAuth(id: string, auth: api$0.Credentials, keepPassword: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1798772306, id, auth, keepPassword);
 }
 
 /**

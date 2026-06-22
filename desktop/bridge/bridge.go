@@ -30,17 +30,20 @@ type Bridge struct {
 func New(c *client.Client) *Bridge { return &Bridge{client: c} }
 
 // Add submits a download and returns its new id. dir, filename, and segments are
-// optional overrides (empty string / 0 means "let the daemon decide"), so the
-// frontend's quick-add path can pass ("", "", 0, "") and behave exactly as the
-// bare-URL form did.
-func (b *Bridge) Add(url, dir, filename string, segments int, priority api.Priority) (string, error) {
-	req := api.NewAddRequestWithOptions(url, api.Add{
+// optional overrides (empty string / 0 means "let the daemon decide"); auth is
+// optional request credentials, sent only when non-empty, so the quick-add path
+// can pass zero values and behave exactly as the bare-URL form did.
+func (b *Bridge) Add(url, dir, filename string, segments int, priority api.Priority, auth api.Credentials) (string, error) {
+	add := api.Add{
 		Priority: priority,
 		Dir:      dir,
 		Filename: filename,
 		Segments: segments,
-	})
-	resp, err := b.client.Do(context.Background(), req)
+	}
+	if !auth.IsZero() {
+		add.Auth = &auth
+	}
+	resp, err := b.client.Do(context.Background(), api.NewAddRequestWithOptions(url, add))
 	if err != nil {
 		return "", err
 	}
@@ -137,6 +140,14 @@ func (b *Bridge) SetConfig(downloadDir string, segments int, priority api.Priori
 		return api.ConfigView{}, respErr(resp)
 	}
 	return resp.Config.Config, nil
+}
+
+// SetAuth replaces a download's request credentials so a 401'd or hotlink-blocked
+// download can be fixed and resumed. keepPassword=true keeps the stored password
+// and applies only auth's other fields — the wire never echoes a password back,
+// so the properties editor leaves it blank when unchanged.
+func (b *Bridge) SetAuth(id string, auth api.Credentials, keepPassword bool) error {
+	return b.ack(api.NewSetAuthRequest(id, auth, keepPassword))
 }
 
 // OpenFile opens a downloaded file with the OS default application. The path is

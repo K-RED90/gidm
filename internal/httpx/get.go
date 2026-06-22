@@ -14,8 +14,10 @@ import (
 //
 // Like RangeGet it reuses the pooled transport via do, so keep-alive holds and
 // only ctx governs the streaming read (no overall client timeout).
-func (c *Client) Get(ctx context.Context, rawURL string) (*http.Response, error) {
-	resp, err := c.do(ctx, http.MethodGet, rawURL, nil)
+func (c *Client) Get(ctx context.Context, rawURL string, opts RequestOptions) (*http.Response, error) {
+	resp, err := c.do(ctx, http.MethodGet, rawURL, func(req *http.Request) {
+		opts.apply(req)
+	})
 	if err != nil {
 		return nil, err
 	}

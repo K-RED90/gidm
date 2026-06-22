@@ -17,6 +17,7 @@ import (
 	"github.com/K-RED90/gidm/internal/engine"
 	"github.com/K-RED90/gidm/internal/httpfetch"
 	"github.com/K-RED90/gidm/internal/httpx"
+	"github.com/K-RED90/gidm/internal/secret"
 	"github.com/K-RED90/gidm/internal/store/sqlite"
 )
 
@@ -88,7 +89,16 @@ func serve(cfg *config.Config, log *slog.Logger) error {
 	}
 	fetcher := httpfetch.New(client)
 
-	store, err := sqlite.New(cfg.Storage.DBPath)
+	// The vault encrypts per-download credentials at rest. Its key lives in the OS
+	// keychain (with a 0600 key-file fallback beside the database for headless
+	// hosts), so credentials are never persisted in the clear.
+	keyPath := filepath.Join(filepath.Dir(cfg.Storage.DBPath), "secret.key")
+	vault, err := secret.New("gidm", keyPath)
+	if err != nil {
+		return fmt.Errorf("gidmd: credential vault: %w", err)
+	}
+
+	store, err := sqlite.New(cfg.Storage.DBPath, sqlite.WithVault(vault))
 	if err != nil {
 		return fmt.Errorf("gidmd: open store %q: %w", cfg.Storage.DBPath, err)
 	}

@@ -23,8 +23,8 @@ func New(c *httpx.Client) *Fetcher {
 }
 
 // Probe maps an httpx.ProbeResult onto engine.ProbeInfo.
-func (f *Fetcher) Probe(ctx context.Context, url string) (engine.ProbeInfo, error) {
-	pr, err := f.c.Probe(ctx, url)
+func (f *Fetcher) Probe(ctx context.Context, url string, opts engine.RequestOptions) (engine.ProbeInfo, error) {
+	pr, err := f.c.Probe(ctx, url, httpxOptions(opts))
 	if err != nil {
 		return engine.ProbeInfo{}, err
 	}
@@ -40,8 +40,8 @@ func (f *Fetcher) Probe(ctx context.Context, url string) (engine.ProbeInfo, erro
 
 // RangeGet streams one segment's bytes, returning the response body for the
 // engine to copy and close.
-func (f *Fetcher) RangeGet(ctx context.Context, url string, start, end int64) (io.ReadCloser, error) {
-	resp, err := f.c.RangeGet(ctx, url, start, end)
+func (f *Fetcher) RangeGet(ctx context.Context, url string, start, end int64, opts engine.RequestOptions) (io.ReadCloser, error) {
+	resp, err := f.c.RangeGet(ctx, url, start, end, httpxOptions(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -49,10 +49,22 @@ func (f *Fetcher) RangeGet(ctx context.Context, url string, start, end int64) (i
 }
 
 // Get streams the full body for the single-segment fallback.
-func (f *Fetcher) Get(ctx context.Context, url string) (io.ReadCloser, error) {
-	resp, err := f.c.Get(ctx, url)
+func (f *Fetcher) Get(ctx context.Context, url string, opts engine.RequestOptions) (io.ReadCloser, error) {
+	resp, err := f.c.Get(ctx, url, httpxOptions(opts))
 	if err != nil {
 		return nil, err
 	}
 	return resp.Body, nil
+}
+
+// httpxOptions translates the engine's per-request auth into the HTTP layer's
+// equivalent, the single seam where engine credential types become httpx types.
+func httpxOptions(o engine.RequestOptions) httpx.RequestOptions {
+	return httpx.RequestOptions{
+		Username: o.Username,
+		Password: o.Password,
+		Referer:  o.Referer,
+		Cookie:   o.Cookie,
+		Headers:  o.Headers,
+	}
 }

@@ -23,16 +23,19 @@ type ProbeInfo struct {
 //
 // Returned bodies stream the response; the caller closes them and must not
 // buffer them into memory.
+// Every method takes the download's RequestOptions so the adapter can attach
+// per-download credentials/headers (Basic auth, Referer, Cookie). The zero value
+// adds nothing, so an unauthenticated download is unchanged.
 type Fetcher interface {
 	// Probe reports size, range support, validators, and a suggested filename
 	// without downloading the body.
-	Probe(ctx context.Context, url string) (ProbeInfo, error)
+	Probe(ctx context.Context, url string, opts RequestOptions) (ProbeInfo, error)
 
 	// RangeGet streams bytes [start, end] (inclusive) for one segment.
-	RangeGet(ctx context.Context, url string, start, end int64) (io.ReadCloser, error)
+	RangeGet(ctx context.Context, url string, start, end int64, opts RequestOptions) (io.ReadCloser, error)
 
 	// Get streams the full body. The engine uses it only for the single-segment
 	// fallback (unknown size or no range support), reading sequentially from
 	// offset 0 until io.EOF.
-	Get(ctx context.Context, url string) (io.ReadCloser, error)
+	Get(ctx context.Context, url string, opts RequestOptions) (io.ReadCloser, error)
 }

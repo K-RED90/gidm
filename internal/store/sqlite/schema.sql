@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS downloads (
 	updated_at    TEXT NOT NULL,
 	priority      INTEGER NOT NULL DEFAULT 0,
 	segment_count INTEGER NOT NULL DEFAULT 0,
-	max_rate      INTEGER NOT NULL DEFAULT 0
+	max_rate      INTEGER NOT NULL DEFAULT 0,
+	credentials   BLOB
 );
 
 CREATE TABLE IF NOT EXISTS segments (

@@ -7,7 +7,9 @@ export {
 } from "./models.js";
 
 export type {
+    AuthView,
     ConfigView,
+    Credentials,
     DownloadView,
     SegmentView
 } from "./models.js";

@@ -89,6 +89,12 @@ type Download struct {
 	// and applied live mid-transfer when changed via Manager.SetRate.
 	MaxRate int
 
+	// Auth carries optional per-download request credentials (HTTP Basic auth,
+	// Referer, Cookie, custom headers). nil ⇒ no auth. The store persists it
+	// encrypted (see internal/secret), so credentials survive a restart without
+	// ever being written in plaintext; the engine only threads it to the Fetcher.
+	Auth *RequestOptions
+
 	Segments []Segment
 
 	CreatedAt time.Time
@@ -100,6 +106,24 @@ type Download struct {
 	SpeedBps int64
 }
 
+// RequestOptions is the per-download request authentication the engine threads to
+// the Fetcher: HTTP Basic auth, a Referer, an explicit Cookie, and extra request
+// headers. The engine only carries it; the HTTP adapter applies it to the request.
+type RequestOptions struct {
+	Username string
+	Password string
+	Referer  string
+	Cookie   string
+	Headers  map[string]string
+}
+
+// IsZero reports whether no auth field is set, so a Submit/SetAuth can store nil
+// rather than an empty credentials record.
+func (o RequestOptions) IsZero() bool {
+	return o.Username == "" && o.Password == "" && o.Referer == "" &&
+		o.Cookie == "" && len(o.Headers) == 0
+}
+
 type Segment struct {
 	Index int
 	Start int64 // inclusive
@@ -107,6 +131,20 @@ type Segment struct {
 
 	// Bytes already written; on resume the worker requests from Start+Completed.
 	Completed int64
+
+	// SpeedBps is this connection's live transfer rate in bytes/sec, folded in by
+	// the Manager for an active download (0 otherwise). Transient like
+	// Download.SpeedBps: the store never reads or writes it.
+	SpeedBps int64
+}
+
+// requestOptions returns dl's per-request auth options, or the zero value (no
+// auth) when none are attached.
+func requestOptions(dl *Download) RequestOptions {
+	if dl.Auth == nil {
+		return RequestOptions{}
+	}
+	return *dl.Auth
 }
 
 func (s Segment) Size() int64      { return s.End - s.Start + 1 }
