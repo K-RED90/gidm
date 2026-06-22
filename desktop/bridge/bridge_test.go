@@ -52,9 +52,58 @@ func newBridge(t *testing.T, handler func(api.Request) api.Response) *bridge.Bri
 }
 
 func TestBridgeAdd(t *testing.T) {
-	b := newBridge(t, func(api.Request) api.Response { return api.AddResponse("abc") })
-	if id, err := b.Add("https://x/y"); err != nil || id != "abc" {
+	// A channel carries the decoded request out of the daemon goroutine so the
+	// assertion is synchronized (clean under -race) rather than racing a field.
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.AddResponse("abc")
+	})
+	id, err := b.Add("https://x/y", "/srv/dl", "movie.mkv", 8, api.PriorityHigh)
+	if err != nil || id != "abc" {
 		t.Fatalf("Add = (%q, %v), want (abc, nil)", id, err)
+	}
+	got := <-reqs
+	if got.Op != api.OpAdd || got.Add == nil {
+		t.Fatalf("request op = %q, add = %+v", got.Op, got.Add)
+	}
+	if got.Add.URL != "https://x/y" || got.Add.Dir != "/srv/dl" ||
+		got.Add.Filename != "movie.mkv" || got.Add.Segments != 8 || got.Add.Priority != api.PriorityHigh {
+		t.Errorf("forwarded add = %+v, want url/dir/filename/segments/priority all set", got.Add)
+	}
+}
+
+// TestBridgeAddQuick guards the quick-add path: zero overrides reproduce the
+// bare-URL form (empty dir/filename, no segment override, default priority).
+func TestBridgeAddQuick(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.AddResponse("q1")
+	})
+	if _, err := b.Add("https://x/y", "", "", 0, ""); err != nil {
+		t.Fatalf("Add (quick): %v", err)
+	}
+	got := <-reqs
+	if got.Add == nil || got.Add.URL != "https://x/y" ||
+		got.Add.Dir != "" || got.Add.Filename != "" || got.Add.Segments != 0 || got.Add.Priority != "" {
+		t.Errorf("quick add = %+v, want only URL set", got.Add)
+	}
+}
+
+func TestBridgeSetPriority(t *testing.T) {
+	reqs := make(chan api.Request, 1)
+	b := newBridge(t, func(r api.Request) api.Response {
+		reqs <- r
+		return api.OKResponse()
+	})
+	if err := b.SetPriority("d1", api.PriorityLow); err != nil {
+		t.Fatalf("SetPriority: %v", err)
+	}
+	got := <-reqs
+	if got.Op != api.OpSetPriority || got.SetPriority == nil ||
+		got.SetPriority.ID != "d1" || got.SetPriority.Priority != api.PriorityLow {
+		t.Errorf("forwarded set-priority = %+v (op %q), want {d1 low}", got.SetPriority, got.Op)
 	}
 }
 

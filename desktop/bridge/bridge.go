@@ -29,9 +29,18 @@ type Bridge struct {
 // New builds a Bridge over a daemon client.
 func New(c *client.Client) *Bridge { return &Bridge{client: c} }
 
-// Add submits a URL and returns the new download's id.
-func (b *Bridge) Add(url string) (string, error) {
-	resp, err := b.client.Do(context.Background(), api.NewAddRequest(url))
+// Add submits a download and returns its new id. dir, filename, and segments are
+// optional overrides (empty string / 0 means "let the daemon decide"), so the
+// frontend's quick-add path can pass ("", "", 0, "") and behave exactly as the
+// bare-URL form did.
+func (b *Bridge) Add(url, dir, filename string, segments int, priority api.Priority) (string, error) {
+	req := api.NewAddRequestWithOptions(url, api.Add{
+		Priority: priority,
+		Dir:      dir,
+		Filename: filename,
+		Segments: segments,
+	})
+	resp, err := b.client.Do(context.Background(), req)
 	if err != nil {
 		return "", err
 	}
@@ -77,6 +86,11 @@ func (b *Bridge) Resume(id string) error { return b.ack(api.NewResumeRequest(id)
 
 // Remove deletes a download.
 func (b *Bridge) Remove(id string) error { return b.ack(api.NewRmRequest(id)) }
+
+// SetPriority changes a download's scheduling priority (low/normal/high).
+func (b *Bridge) SetPriority(id string, priority api.Priority) error {
+	return b.ack(api.NewSetPriorityRequest(id, priority))
+}
 
 // Health reports whether gidmd answers a ping. Any transport error or a
 // non-pong response reads as "not running".
