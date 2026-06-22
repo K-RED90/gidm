@@ -21,11 +21,11 @@
 
 <style>
   .statusbar {
-    grid-area: statusbar;
     display: flex;
     align-items: center;
     gap: var(--space-3);
     height: var(--statusbar-h);
+    flex-shrink: 0;
     padding: 0 var(--space-4);
     border-top: 1px solid var(--border);
     background: var(--surface);
