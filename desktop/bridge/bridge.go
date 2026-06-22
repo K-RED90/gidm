@@ -92,6 +92,15 @@ func (b *Bridge) SetPriority(id string, priority api.Priority) error {
 	return b.ack(api.NewSetPriorityRequest(id, priority))
 }
 
+// OpenFile opens a downloaded file with the OS default application. The path is
+// the download's destination (the frontend already has it), so no daemon lookup
+// is needed.
+func (b *Bridge) OpenFile(path string) error { return openPath(path) }
+
+// RevealInFolder shows a file in the OS file manager, selecting it where the
+// platform supports it.
+func (b *Bridge) RevealInFolder(path string) error { return revealPath(path) }
+
 // Health reports whether gidmd answers a ping. Any transport error or a
 // non-pong response reads as "not running".
 func (b *Bridge) Health() bool {

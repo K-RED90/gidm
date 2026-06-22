@@ -10,7 +10,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -38,10 +38,17 @@ export function Health(): $CancellablePromise<boolean> {
  * List returns every download. It never returns a nil slice on success so the
  * frontend can bind it directly.
  */
-export function List(): $CancellablePromise<api$0.DownloadView[]> {
-    return $Call.ByID(1299341348).then(($result: any) => {
-        return $$createType1($result);
-    });
+export function List(): $CancellablePromise<api$0.DownloadView[] | null> {
+    return $Call.ByID(1299341348);
+}
+
+/**
+ * OpenFile opens a downloaded file with the OS default application. The path is
+ * the download's destination (the frontend already has it), so no daemon lookup
+ * is needed.
+ */
+export function OpenFile(path: string): $CancellablePromise<void> {
+    return $Call.ByID(207313962, path);
 }
 
 /**
@@ -66,6 +73,14 @@ export function Resume(id: string): $CancellablePromise<void> {
 }
 
 /**
+ * RevealInFolder shows a file in the OS file manager, selecting it where the
+ * platform supports it.
+ */
+export function RevealInFolder(path: string): $CancellablePromise<void> {
+    return $Call.ByID(2540813946, path);
+}
+
+/**
  * SetPriority changes a download's scheduling priority (low/normal/high).
  */
 export function SetPriority(id: string, priority: api$0.Priority): $CancellablePromise<void> {
@@ -77,22 +92,13 @@ export function SetPriority(id: string, priority: api$0.Priority): $CancellableP
  * daemon was reachable. A transport error yields (nil, false) so the UI can show
  * a "daemon unreachable" state without distinguishing error kinds.
  */
-export function Snapshot(): $CancellablePromise<[api$0.DownloadView[], boolean]> {
-    return $Call.ByID(3366026168).then(($result: any) => {
-        $result[0] = $$createType1($result[0]);
-        return $result;
-    });
+export function Snapshot(): $CancellablePromise<[api$0.DownloadView[] | null, boolean]> {
+    return $Call.ByID(3366026168);
 }
 
 /**
  * Status returns one download by id.
  */
 export function Status(id: string): $CancellablePromise<api$0.DownloadView> {
-    return $Call.ByID(3632350566, id).then(($result: any) => {
-        return $$createType0($result);
-    });
+    return $Call.ByID(3632350566, id);
 }
-
-// Private type creation functions
-const $$createType0 = api$0.DownloadView.createFrom;
-const $$createType1 = $Create.Array($$createType0);

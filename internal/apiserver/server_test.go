@@ -32,7 +32,7 @@ type fakeManager struct {
 	listErr        error
 	pauseErr       error
 	resumeErr      error
-	cancelErr      error
+	deleteErr      error
 	setPriorityErr error
 
 	// lastAddOpts records the options of the most recent Submit so a handler test
@@ -108,8 +108,17 @@ func (f *fakeManager) Resume(_ context.Context, id string) error {
 	return f.setStatus(id, engine.StatusQueued, f.resumeErr)
 }
 
-func (f *fakeManager) Cancel(_ context.Context, id string) error {
-	return f.setStatus(id, engine.StatusCanceled, f.cancelErr)
+func (f *fakeManager) Delete(_ context.Context, id string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.downloads[id]; !ok {
+		return engine.ErrNotFound
+	}
+	delete(f.downloads, id)
+	return nil
 }
 
 func (f *fakeManager) SetPriority(_ context.Context, id string, p engine.Priority) error {
@@ -257,12 +266,12 @@ func TestRoundTripAllVerbs(t *testing.T) {
 		t.Fatalf("after resume status = %q, want queued", r.Status.Download.Status)
 	}
 
-	// rm -> Cancel; engine canceled maps to api paused on the wire
+	// rm deletes the download outright; a later status is not_found
 	if r := roundTrip(t, sock, api.NewRmRequest(id)); !r.OK {
 		t.Fatalf("rm: got %+v", r)
 	}
-	if r := roundTrip(t, sock, api.NewStatusRequest(id)); r.Status.Download.Status != api.StatusPaused {
-		t.Fatalf("after rm status = %q, want paused (canceled->paused drift)", r.Status.Download.Status)
+	if r := roundTrip(t, sock, api.NewStatusRequest(id)); r.OK || r.Error == nil || r.Error.Code != api.CodeNotFound {
+		t.Fatalf("after rm status = %+v, want not_found", r)
 	}
 
 	// ping -> version

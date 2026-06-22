@@ -60,13 +60,6 @@
     </div>
   </nav>
 
-  <div class="card" class:up={store.daemonUp}>
-    <span class="dot"></span>
-    <div class="card-text">
-      <strong>{store.daemonUp ? 'Daemon connected' : 'Daemon offline'}</strong>
-      <span>{store.daemonUp ? 'Downloads run in the background' : 'Trying to reconnect…'}</span>
-    </div>
-  </div>
 </aside>
 
 <style>
@@ -169,44 +162,5 @@
     padding: 1px 6px;
   }
 
-  .card {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin-top: var(--space-2);
-    padding: var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--bg);
-  }
-  .dot {
-    flex: none;
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: var(--danger);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
-  }
-  .card.up .dot {
-    background: var(--success);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
-  }
-  .card-text {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-  }
-  .card-text strong {
-    font-size: var(--text-sm);
-    font-weight: 600;
-  }
-  .card-text span {
-    font-size: var(--text-xs);
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+
 </style>

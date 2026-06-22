@@ -107,14 +107,29 @@ func dispatch(args []string, c *client, asJSON bool, stdout, stderr io.Writer) i
 		fs := flag.NewFlagSet("add", flag.ContinueOnError)
 		fs.SetOutput(stderr)
 		priority := fs.String("priority", "", "download priority: low | normal | high (default normal)")
+		dir := fs.String("dir", "", "destination directory (absolute; default: configured download dir)")
+		filename := fs.String("filename", "", "output filename (single name, no path separators)")
+		segments := fs.Int("segments", 0, "number of parallel segments (0 = daemon default)")
 		if err := fs.Parse(rest); err != nil {
 			return exitBadRequest
 		}
 		if fs.NArg() != 1 {
-			_, _ = fmt.Fprintln(stderr, "gidm: add requires exactly one argument: add [--priority low|normal|high] <url>")
+			_, _ = fmt.Fprintln(stderr, "gidm: add requires exactly one argument: add [flags] <url>")
 			return exitBadRequest
 		}
-		return runCommand(c, asJSON, stdout, stderr, api.NewAddRequestWithPriority(fs.Arg(0), api.Priority(*priority)),
+		add := api.Add{
+			URL:      fs.Arg(0),
+			Priority: api.Priority(*priority),
+			Dir:      *dir,
+			Filename: *filename,
+			Segments: *segments,
+		}
+		// Validate client-side for a clear, immediate message; the daemon revalidates.
+		if err := api.ValidateAdd(add); err != nil {
+			_, _ = fmt.Fprintln(stderr, "gidm:", err)
+			return exitBadRequest
+		}
+		return runCommand(c, asJSON, stdout, stderr, api.NewAddRequestWithOptions(add.URL, add),
 			func(w io.Writer, r api.Response) error { return renderAdd(w, r, asJSON) })
 	case "list":
 		if code := noArgs(stderr, "list", rest); code != exitOK {
@@ -268,12 +283,14 @@ func usage(w io.Writer, gf *flag.FlagSet) {
 	_, _ = fmt.Fprintf(w, "gidm %s — Go Internet Download Manager\n\n", version)
 	_, _ = fmt.Fprintln(w, "Usage: gidm [global flags] <command> [args]")
 	_, _ = fmt.Fprintln(w, "\nCommands:")
-	_, _ = fmt.Fprintln(w, "  add [--priority L] <url>   queue a download (L: low|normal|high) and print its id")
+	_, _ = fmt.Fprintln(w, "  add [flags] <url>          queue a download and print its id")
+	_, _ = fmt.Fprintln(w, "      flags: --priority low|normal|high  --dir <abs path>")
+	_, _ = fmt.Fprintln(w, "             --filename <name>  --segments <n>")
 	_, _ = fmt.Fprintln(w, "  list                       list all downloads")
 	_, _ = fmt.Fprintln(w, "  status <id>                show one download (alias: get)")
 	_, _ = fmt.Fprintln(w, "  pause <id>                 pause a download")
 	_, _ = fmt.Fprintln(w, "  resume <id>                resume a paused download")
-	_, _ = fmt.Fprintln(w, "  rm <id>                    cancel and remove a download")
+	_, _ = fmt.Fprintln(w, "  rm <id>                    remove a download (deletes it; a completed file is kept)")
 	_, _ = fmt.Fprintln(w, "  set-priority <id> <L>      change priority (L: low|normal|high)")
 	_, _ = fmt.Fprintln(w, "\nGlobal flags:")
 	gf.PrintDefaults()

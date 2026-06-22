@@ -410,6 +410,58 @@ func TestManagerCancelStopsAndKeepsPart(t *testing.T) {
 	close(f.release)
 }
 
+// TestManagerDeleteRemovesRecordAndPart deletes an in-flight download and asserts
+// the record disappears from the store, its .part is discarded, and a worker
+// finishing concurrently does not resurrect the record.
+func TestManagerDeleteRemovesRecordAndPart(t *testing.T) {
+	const size = 4 << 20
+	content := makeContent(size)
+	f := &gatedFetcher{content: content, release: make(chan struct{})}
+	cfg := smallDownloadCfg()
+	cfg.SegmentsPerDownload = 4
+	m, store, dir := newManager(t, f, cfg, 2)
+
+	if err := m.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
+
+	id, err := m.Submit(context.Background(), "https://example.com/gate.bin", PriorityNormal, AddOptions{})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitStatus(t, m, id, StatusActive, 3*time.Second)
+	time.Sleep(50 * time.Millisecond) // let the first chunks land
+
+	dest := filepath.Join(dir, "gate.bin")
+	if _, err := os.Stat(dest + partSuffix); err != nil {
+		t.Fatalf("expected a .part mid-transfer: %v", err)
+	}
+
+	if err := m.Delete(context.Background(), id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	close(f.release) // let the aborted worker drain through its settle path
+
+	// The record is gone immediately and stays gone — a finishing worker must not
+	// recreate it.
+	if _, err := m.Get(context.Background(), id); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get after delete = %v, want ErrNotFound", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if _, err := store.LoadDownload(context.Background(), id); !errors.Is(err, ErrNotFound) {
+		t.Errorf("record reappeared after delete: %v", err)
+	}
+	if _, err := os.Stat(dest + partSuffix); !os.IsNotExist(err) {
+		t.Errorf(".part still present after delete: %v", err)
+	}
+
+	// Deleting an unknown id is ErrNotFound.
+	if err := m.Delete(context.Background(), "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Delete(unknown) = %v, want ErrNotFound", err)
+	}
+}
+
 // TestManagerRecoversActiveDownloadOnStart pre-seeds the store with an active,
 // partially-complete download plus a matching .part, then Starts the manager and
 // asserts it resumes to completion without re-fetching the done segments.

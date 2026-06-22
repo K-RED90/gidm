@@ -46,7 +46,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		}
 		views := make([]api.DownloadView, 0, len(list))
 		for _, d := range list {
-			views = append(views, toView(d))
+			views = append(views, toView(d, false))
 		}
 		return api.ListResponse(views), verb, ""
 
@@ -62,7 +62,7 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 		if err != nil {
 			return s.toResponse(err), verb, id
 		}
-		return api.StatusResponse(toView(d)), verb, id
+		return api.StatusResponse(toView(d, true)), verb, id
 
 	case api.OpPause:
 		if req.Pause == nil {
@@ -98,9 +98,10 @@ func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Respo
 			return s.toResponse(err), verb, ""
 		}
 		id = req.Rm.ID
-		// rm maps to Cancel: an operator-initiated stop that keeps the .part for a
-		// later Resume.
-		if err := s.mgr.Cancel(ctx, id); err != nil {
+		// rm deletes the download: it is removed from the store and its .part file is
+		// discarded (a completed download's final file is left in place). To merely
+		// stop a transfer while keeping it for a later Resume, use pause.
+		if err := s.mgr.Delete(ctx, id); err != nil {
 			return s.toResponse(err), verb, id
 		}
 		return api.OKResponse(), verb, id

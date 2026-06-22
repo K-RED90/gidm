@@ -7,25 +7,51 @@
   import StatusBar from './components/StatusBar.svelte'
   import DaemonBanner from './components/DaemonBanner.svelte'
   import AddDialog from './components/AddDialog.svelte'
+  import DetailsDialog from './components/DetailsDialog.svelte'
+  import ContextMenu from './components/ContextMenu.svelte'
+  import Toaster from './components/Toaster.svelte'
 
   let addOpen = $state(false)
+  let detailsId = $state<string | null>(null)
+
+  // modalOpen tells the table's keyboard handler to stand down while a dialog is
+  // up; set it alongside each open/close so it stays correct without an effect.
+  function openAdd(): void {
+    addOpen = true
+    store.modalOpen = true
+  }
+  function closeAdd(): void {
+    addOpen = false
+    store.modalOpen = detailsId !== null
+  }
+  function openDetails(id: string): void {
+    detailsId = id
+    store.modalOpen = true
+  }
+  function closeDetails(): void {
+    detailsId = null
+    store.modalOpen = addOpen
+  }
 
   onMount(() => store.connect())
 </script>
 
 <div class="app">
-  <Toolbar onAdd={() => (addOpen = true)} />
+  <Toolbar onAdd={openAdd} />
   <Sidebar />
   <main class="main">
     {#if !store.daemonUp}
       <DaemonBanner />
     {/if}
-    <DownloadsTable />
+    <DownloadsTable onDetails={openDetails} />
   </main>
   <StatusBar />
 </div>
 
-<AddDialog open={addOpen} onClose={() => (addOpen = false)} />
+<AddDialog open={addOpen} onClose={closeAdd} />
+<DetailsDialog id={detailsId} onClose={closeDetails} />
+<ContextMenu />
+<Toaster />
 
 <style>
   .app {
