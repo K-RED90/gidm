@@ -76,6 +76,13 @@ type Download struct {
 
 	Checksum string // e.g. "sha256:abc123", verified on completion
 
+	// SegmentCount is a per-download override for how many ranged segments to plan
+	// and how many transfer workers to fan out. Zero means "use the configured
+	// SegmentsPerDownload". It is clamped to [1, MaxSegments] at submit time and
+	// persisted, so a resume re-plans the same way. The whole-body fallback (no
+	// range support / unknown size) ignores it.
+	SegmentCount int
+
 	Segments []Segment
 
 	CreatedAt time.Time

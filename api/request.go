@@ -41,6 +41,15 @@ type Add struct {
 	// Priority is optional; an empty value means PriorityNormal, so an older
 	// client that omits the field still produces a valid normal-priority add.
 	Priority Priority `json:"priority,omitempty"`
+
+	// Dir, Filename, and Segments are optional per-download overrides. Each zero
+	// value means "use the daemon default", so an older client (or the bare-URL
+	// form) that omits them is unchanged: Dir empty → the configured download
+	// directory; Filename empty → the server-suggested or URL-derived name;
+	// Segments 0 → cfg.SegmentsPerDownload.
+	Dir      string `json:"dir,omitempty"`      // destination directory (absolute)
+	Filename string `json:"filename,omitempty"` // single path element, no separators
+	Segments int    `json:"segments,omitempty"` // per-download segment count
 }
 
 type Status struct {
@@ -73,6 +82,14 @@ func NewAddRequest(url string) Request {
 // NewAddRequestWithPriority is NewAddRequest with an explicit priority.
 func NewAddRequestWithPriority(url string, p Priority) Request {
 	return Request{Version: Version, Op: OpAdd, Add: &Add{URL: url, Priority: p}}
+}
+
+// NewAddRequestWithOptions builds an add request carrying the full set of
+// per-download overrides. The URL is set from url; opts supplies the optional
+// Priority/Dir/Filename/Segments (any opts.URL is ignored in favor of url).
+func NewAddRequestWithOptions(url string, opts Add) Request {
+	opts.URL = url
+	return Request{Version: Version, Op: OpAdd, Add: &opts}
 }
 
 func NewListRequest() Request {

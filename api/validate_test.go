@@ -51,6 +51,56 @@ func TestValidateAddPriority(t *testing.T) {
 	}
 }
 
+func TestValidateAddDestination(t *testing.T) {
+	const url = "https://example.com/f"
+	tests := []struct {
+		name     string
+		dir      string
+		filename string
+		wantErr  bool
+	}{
+		{"both empty", "", "", false},
+		{"abs dir only", "/srv/downloads", "", false},
+		{"abs dir and plain filename", "/srv/downloads", "movie.mkv", false},
+		{"plain filename only", "", "movie.mkv", false},
+		{"relative dir", "downloads", "", true},
+		{"dir with dotdot", "/srv/../etc", "", true},
+		{"unclean dir trailing slash", "/srv/downloads/", "", true},
+		{"filename with separator", "/srv", "sub/movie.mkv", true},
+		{"filename with backslash", "/srv", `sub\movie.mkv`, true},
+		{"filename dot", "", ".", true},
+		{"filename dotdot", "", "..", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateAdd(Add{URL: url, Dir: tt.dir, Filename: tt.filename})
+			if tt.wantErr {
+				if !errors.Is(err, ErrInvalidDestination) {
+					t.Fatalf("err = %v, want ErrInvalidDestination", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestValidateAddSegments(t *testing.T) {
+	const url = "https://example.com/f"
+	for _, n := range []int{0, 1, 8, maxAddSegments} {
+		if err := ValidateAdd(Add{URL: url, Segments: n}); err != nil {
+			t.Errorf("ValidateAdd(segments=%d) = %v, want nil", n, err)
+		}
+	}
+	for _, n := range []int{-1, maxAddSegments + 1} {
+		if err := ValidateAdd(Add{URL: url, Segments: n}); !errors.Is(err, ErrInvalidSegments) {
+			t.Errorf("ValidateAdd(segments=%d) = %v, want ErrInvalidSegments", n, err)
+		}
+	}
+}
+
 func TestValidateSetPriority(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -78,7 +78,7 @@ func TestManagerEndToEndConcurrent(t *testing.T) {
 	const n = 4
 	ids := make([]string, n)
 	for i := range ids {
-		id, err := m.Submit(context.Background(), srv.URL+"/file-"+itoa(i)+".bin", engine.PriorityNormal)
+		id, err := m.Submit(context.Background(), srv.URL+"/file-"+itoa(i)+".bin", engine.PriorityNormal, engine.AddOptions{})
 		if err != nil {
 			t.Fatalf("Submit %d: %v", i, err)
 		}
@@ -135,7 +135,7 @@ func TestManagerEndToEndPauseResume(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 
-	id, err := m.Submit(context.Background(), srv.URL+"/pr.bin", engine.PriorityNormal)
+	id, err := m.Submit(context.Background(), srv.URL+"/pr.bin", engine.PriorityNormal, engine.AddOptions{})
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

@@ -34,21 +34,29 @@ type fakeManager struct {
 	resumeErr      error
 	cancelErr      error
 	setPriorityErr error
+
+	// lastAddOpts records the options of the most recent Submit so a handler test
+	// can assert the add op forwards Dir/Filename/Segments unchanged.
+	lastAddOpts engine.AddOptions
 }
 
 func newFakeManager() *fakeManager {
 	return &fakeManager{downloads: make(map[string]*engine.Download)}
 }
 
-func (f *fakeManager) Submit(_ context.Context, url string, priority engine.Priority) (string, error) {
+func (f *fakeManager) Submit(_ context.Context, url string, priority engine.Priority, opts engine.AddOptions) (string, error) {
 	if f.submitErr != nil {
 		return "", f.submitErr
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lastAddOpts = opts
 	f.nextID++
 	id := "id-" + string(rune('a'+f.nextID-1))
-	f.downloads[id] = &engine.Download{ID: id, URL: url, Status: engine.StatusQueued, Priority: priority}
+	f.downloads[id] = &engine.Download{
+		ID: id, URL: url, Status: engine.StatusQueued, Priority: priority,
+		Destination: opts.Dir, SegmentCount: opts.Segments,
+	}
 	return id, nil
 }
 
@@ -327,6 +335,30 @@ func TestPriorityEndToEnd(t *testing.T) {
 	plain := roundTrip(t, sock, api.NewAddRequest("https://example.com/g.bin"))
 	if got := roundTrip(t, sock, api.NewStatusRequest(plain.Add.ID)); got.Status.Download.Priority != api.PriorityNormal {
 		t.Fatalf("default-priority add = %q, want normal", got.Status.Download.Priority)
+	}
+}
+
+// TestAddForwardsOptions asserts the add handler decodes Dir/Filename/Segments and
+// forwards them to the Manager unchanged, and that an invalid override is rejected
+// at the server before reaching the Manager.
+func TestAddForwardsOptions(t *testing.T) {
+	mgr := newFakeManager()
+	_, sock := startServer(t, mgr)
+
+	resp := roundTrip(t, sock, api.NewAddRequestWithOptions("https://example.com/f.bin", api.Add{
+		Dir: "/srv/dl", Filename: "chosen.bin", Segments: 12,
+	}))
+	if !resp.OK || resp.Add == nil {
+		t.Fatalf("add: %+v", resp)
+	}
+	if got := mgr.lastAddOpts; got.Dir != "/srv/dl" || got.Filename != "chosen.bin" || got.Segments != 12 {
+		t.Errorf("forwarded opts = %+v, want {/srv/dl chosen.bin 12}", got)
+	}
+
+	// An invalid destination is rejected with bad_request and never reaches Submit.
+	bad := roundTrip(t, sock, api.NewAddRequestWithOptions("https://example.com/f.bin", api.Add{Dir: "relative/dir"}))
+	if bad.OK || bad.Error == nil || bad.Error.Code != api.CodeBadRequest {
+		t.Errorf("invalid dir add = %+v, want bad_request", bad)
 	}
 }
 

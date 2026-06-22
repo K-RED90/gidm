@@ -89,6 +89,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.ensureColumn(ctx, "downloads", "priority", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	// segment_count carries a per-download segment override; DEFAULT 0 means
+	// "use the configured default", so rows written before it existed behave as
+	// they always did.
+	if err := s.ensureColumn(ctx, "downloads", "segment_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	return nil
 }
 
