@@ -1,5 +1,5 @@
 // Package apiserver is the daemon's Unix-socket control server. It owns a
-// unix-only net.Listener (never tcp), speaks the internal/api NDJSON wire
+// unix-only net.Listener (never tcp), speaks the api NDJSON wire
 // protocol, and dispatches each verb to a Manager facade. It sits above the
 // engine: it may import internal/engine (for the Download type and sentinel
 // errors it translates), but the engine never imports this package, keeping the
@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/config"
 	"github.com/K-RED90/gidm/internal/engine"
 )

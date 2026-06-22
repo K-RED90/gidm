@@ -6,7 +6,7 @@ import (
 	"io"
 	"text/tabwriter"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 )
 
 // writeJSON marshals v as a single compact line plus a trailing newline, so the

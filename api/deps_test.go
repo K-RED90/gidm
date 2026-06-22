@@ -14,7 +14,7 @@ func TestNoForbiddenImports(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping go list dependency check in -short mode")
 	}
-	const pkg = "github.com/K-RED90/gidm/internal/api"
+	const pkg = "github.com/K-RED90/gidm/api"
 	out, err := exec.Command("go", "list", "-deps", pkg).CombinedOutput()
 	if err != nil {
 		t.Fatalf("go list -deps: %v\n%s", err, out)
@@ -28,7 +28,7 @@ func TestNoForbiddenImports(t *testing.T) {
 	for _, dep := range strings.Fields(string(out)) {
 		for _, bad := range forbidden {
 			if dep == bad {
-				t.Errorf("internal/api must not depend on %s", bad)
+				t.Errorf("api must not depend on %s", bad)
 			}
 		}
 	}

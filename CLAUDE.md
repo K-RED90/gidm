@@ -93,9 +93,18 @@ make tidy    # go mod tidy
 ## Roadmap
 
 - **M0** foundation (done): structure, config, tooling, CI, engine contracts.
-- **M1** core engine: segmented download, resume, retries, integrity, SQLite
-  store, HTTP layer. *In progress — SQLite store and `httpx` HTTP layer landed.*
-- **M2** daemon + CLI.
-- **M3** dynamic segmentation (work-stealing), rate limiting, scheduler.
+- **M1** core engine (done): segmented download, resume, retries, integrity,
+  SQLite store, HTTP layer.
+- **M2** daemon + CLI (done).
+- **M3** dynamic segmentation (work-stealing), rate limiting, scheduler (done).
+- **M5** Wails v3 + Svelte desktop app (*in progress — brought ahead of M4*).
+  Foundation landed: separate `desktop/` module via root `go.work`, a thin
+  daemon-client bridge, the Svelte UI shell, daemon auto-start, app menu,
+  single-instance, system tray, and notifications. See `desktop/README.md`.
 - **M4** Chrome extension + native-messaging host.
-- **M5** Wails + Svelte desktop app (`go.work` + `desktop/` module added here).
+
+The wire protocol now lives in the public `api/` package (promoted out of
+`internal/api`) because the desktop is a separate module and the protocol is the
+contract every client speaks. The desktop module must stay separate (it pulls in
+Wails + CGO), so the core's `make` targets set `GOWORK=off` to keep building the
+pure-Go engine/daemon/CLI alone.

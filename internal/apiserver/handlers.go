@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/engine"
 )
 

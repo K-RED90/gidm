@@ -103,11 +103,12 @@ running, `4` timeout, `5` not found.
 
 - **M0** — foundation: structure, config, tooling, CI, engine contracts ✅
 - **M1** — core engine: segmented download, resume, retries, integrity, SQLite
-  store, HTTP layer *(in progress — SQLite store and HTTP layer landed)*
-- **M2** — daemon + CLI
-- **M3** — dynamic segmentation (work-stealing), rate limiting, scheduler
+  store, HTTP layer ✅
+- **M2** — daemon + CLI ✅
+- **M3** — dynamic segmentation (work-stealing), rate limiting, scheduler ✅
+- **M5** — Wails v3 + Svelte desktop app *(in progress — brought ahead of M4;
+  foundation landed, see [`desktop/`](desktop/README.md))*
 - **M4** — Chrome extension + native-messaging host
-- **M5** — Wails + Svelte desktop app
 
 ## License
 

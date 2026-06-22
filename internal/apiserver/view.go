@@ -1,19 +1,26 @@
 package apiserver
 
 import (
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/engine"
 )
 
 // toView projects an engine.Download onto the flat, pure-data api.DownloadView
 // returned over the wire. This is the single boundary where engine types become
 // wire types, so the wire shape can evolve independently of the engine model.
-// Downloaded is summed from the segments' Completed counters (the Manager folds
-// live progress into these before this runs).
+// Downloaded is summed from the segments' Completed counters and SpeedBps is the
+// Manager's sampled rate (it folds both into d before this runs). EtaSecs is
+// derived here: remaining bytes over the live rate, or -1 when it cannot be known
+// (no live rate or unknown total).
 func toView(d *engine.Download) api.DownloadView {
 	var downloaded int64
 	for _, seg := range d.Segments {
 		downloaded += seg.Completed
+	}
+	eta := int64(-1)
+	if d.SpeedBps > 0 && d.TotalSize > 0 {
+		remaining := max(d.TotalSize-downloaded, 0)
+		eta = remaining / d.SpeedBps
 	}
 	return api.DownloadView{
 		ID:          d.ID,
@@ -22,6 +29,8 @@ func toView(d *engine.Download) api.DownloadView {
 		Priority:    priorityToView(d.Priority),
 		TotalSize:   d.TotalSize,
 		Downloaded:  downloaded,
+		SpeedBps:    d.SpeedBps,
+		EtaSecs:     eta,
 		Destination: d.Destination,
 	}
 }
@@ -60,7 +69,7 @@ func priorityFromView(p api.Priority, fallback engine.Priority) engine.Priority 
 // engine's queued/active/paused/completed/failed map 1:1. The wire protocol has
 // no "canceled" status, so engine.StatusCanceled — an operator-stopped,
 // resumable state — is mapped to api.StatusPaused, its closest wire equivalent.
-// This is the single documented drift point per internal/api/view.go's note: if
+// This is the single documented drift point per api/view.go's note: if
 // a client ever needs to distinguish canceled, the wire enum must gain it first.
 func statusToView(s engine.Status) api.DownloadStatus {
 	switch s {

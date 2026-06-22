@@ -33,13 +33,19 @@ const (
 // keeps this package a leaf and lets the wire shape evolve independently of the
 // engine's internal model.
 type DownloadView struct {
-	ID          string         `json:"id"`
-	URL         string         `json:"url"`
-	Status      DownloadStatus `json:"status"`
-	Priority    Priority       `json:"priority"`
-	TotalSize   int64          `json:"total_size"`
-	Downloaded  int64          `json:"downloaded"`
-	Destination string         `json:"destination"`
+	ID         string         `json:"id"`
+	URL        string         `json:"url"`
+	Status     DownloadStatus `json:"status"`
+	Priority   Priority       `json:"priority"`
+	TotalSize  int64          `json:"total_size"`
+	Downloaded int64          `json:"downloaded"`
+	// SpeedBps is the live transfer rate in bytes/sec (0 when not downloading).
+	// EtaSecs is the estimated seconds remaining, or -1 when unknown (no live rate
+	// or unknown total). Both are server-computed so every client shows the same
+	// value rather than each deriving its own from poll deltas.
+	SpeedBps    int64  `json:"speed_bps"`
+	EtaSecs     int64  `json:"eta_secs"`
+	Destination string `json:"destination"`
 }
 
 type AddResult struct {

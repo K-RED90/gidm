@@ -80,6 +80,11 @@ type Download struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+
+	// SpeedBps is the live transfer rate in bytes/sec, folded in by the Manager for
+	// an active download (0 otherwise). Transient: the store never reads or writes
+	// it — it exists only to carry the sampled rate out to a snapshot.
+	SpeedBps int64
 }
 
 type Segment struct {

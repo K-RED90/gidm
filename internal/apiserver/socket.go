@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 )
 
 // probeTimeout bounds the single-instance liveness probe (dial + ping

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/apiserver"
 	"github.com/K-RED90/gidm/internal/config"
 	"github.com/K-RED90/gidm/internal/engine"

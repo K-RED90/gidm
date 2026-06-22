@@ -65,6 +65,17 @@ func newSegProgressSized(segs []Segment, maxSlots int) *segProgress {
 	return p
 }
 
+// total sums every slot's completed bytes, including work-stealing slots beyond
+// the original segment count (unused slots are zero). It is the live
+// downloaded-byte total the Manager's rate sampler differences over time.
+func (p *segProgress) total() int64 {
+	var sum int64
+	for i := range p.completed {
+		sum += p.completed[i].Load()
+	}
+	return sum
+}
+
 // load reads segment idx's completed bytes atomically.
 func (p *segProgress) load(idx int) int64 { return p.completed[idx].Load() }
 

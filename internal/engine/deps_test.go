@@ -21,7 +21,7 @@ func TestEngineImportInvariant(t *testing.T) {
 		t.Fatalf("go list -deps: %v\n%s", err, out)
 	}
 	forbidden := []string{
-		"github.com/K-RED90/gidm/internal/api",
+		"github.com/K-RED90/gidm/api",
 		"github.com/K-RED90/gidm/internal/apiserver",
 		"github.com/K-RED90/gidm/internal/httpx",
 		"github.com/K-RED90/gidm/internal/httpfetch",
