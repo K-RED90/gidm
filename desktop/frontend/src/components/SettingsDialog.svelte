@@ -461,7 +461,7 @@
   .segmented button {
     flex: 1;
     border: 0;
-    border-radius: 4px;
+    border-radius: 999px;
     background: transparent;
     color: var(--muted);
     font: inherit;
