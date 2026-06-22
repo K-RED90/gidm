@@ -18,6 +18,9 @@ coverage.txt
 
 # Claude Code personal settings (workflows under .claude/workflows/ are shared)
 .claude/settings.local.json
+.claude/skills/
+.claude/worktrees/
+.agents/
 
 # OS / editor
 .DS_Store
