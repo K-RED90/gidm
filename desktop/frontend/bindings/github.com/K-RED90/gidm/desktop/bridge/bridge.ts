@@ -17,10 +17,13 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as api$0 from "../../api/models.js";
 
 /**
- * Add submits a URL and returns the new download's id.
+ * Add submits a download and returns its new id. dir, filename, and segments are
+ * optional overrides (empty string / 0 means "let the daemon decide"), so the
+ * frontend's quick-add path can pass ("", "", 0, "") and behave exactly as the
+ * bare-URL form did.
  */
-export function Add(url: string): $CancellablePromise<string> {
-    return $Call.ByID(3931086631, url);
+export function Add(url: string, dir: string, filename: string, segments: number, priority: api$0.Priority): $CancellablePromise<string> {
+    return $Call.ByID(3931086631, url, dir, filename, segments, priority);
 }
 
 /**
@@ -60,6 +63,13 @@ export function Remove(id: string): $CancellablePromise<void> {
  */
 export function Resume(id: string): $CancellablePromise<void> {
     return $Call.ByID(1131144639, id);
+}
+
+/**
+ * SetPriority changes a download's scheduling priority (low/normal/high).
+ */
+export function SetPriority(id: string, priority: api$0.Priority): $CancellablePromise<void> {
+    return $Call.ByID(1176805276, id, priority);
 }
 
 /**
