@@ -183,10 +183,8 @@
     pointer-events: auto;
     width: min(600px, 100%);
     max-height: calc(100vh - 2 * var(--space-5));
-    background: color-mix(in srgb, var(--surface-2) 92%, transparent);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--surface-2);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: var(--radius-lg);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 8px 32px rgba(0, 0, 0, 0.6), 0 32px 100px rgba(0, 0, 0, 0.85);
     overflow: hidden;
@@ -307,7 +305,7 @@
     gap: 3px;
     min-width: 0;
     padding: 10px 12px;
-    background: var(--bg);
+    background: var(--surface-3);
     border-radius: 8px;
   }
   .props .wide {
