@@ -63,6 +63,11 @@ type Manager struct {
 	// construction, so it is read-only thereafter and needs no lock.
 	logger *slog.Logger
 
+	// clock returns the current time for the rate sampler — time.Now in production,
+	// overridden in tests for deterministic sampling. Set once at construction, so
+	// it is read-only thereafter and needs no lock.
+	clock func() time.Time
+
 	mu       sync.Mutex
 	cond     *sync.Cond // signalled when work is enqueued or the manager closes
 	pending  []pendingItem
@@ -72,6 +77,7 @@ type Manager struct {
 	cancels  map[string]context.CancelFunc // one per active job
 	intents  map[string]Status             // operator intent (paused/canceled) for an in-flight job
 	live     map[string]*segProgress       // live counters for active jobs
+	rates    map[string]*rateState         // smoothed transfer rate per active job
 	baseCtx  context.Context
 	baseStop context.CancelFunc
 	workers  sync.WaitGroup
@@ -99,9 +105,11 @@ func NewManager(e *Engine, store Store, maxConcurrent int) *Manager {
 		store:   store,
 		max:     maxConcurrent,
 		logger:  slog.Default(),
+		clock:   time.Now,
 		cancels: make(map[string]context.CancelFunc),
 		intents: make(map[string]Status),
 		live:    make(map[string]*segProgress),
+		rates:   make(map[string]*rateState),
 	}
 	m.cond = sync.NewCond(&m.mu)
 	e.observer = m
@@ -154,6 +162,10 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.workers.Add(1)
 		go m.worker()
 	}
+	// The rate sampler joins the worker WaitGroup so Shutdown waits for it; it exits
+	// when the base context is cancelled.
+	m.workers.Add(1)
+	go m.sampleLoop()
 	m.mu.Unlock()
 	return nil
 }
@@ -256,6 +268,9 @@ func (m *Manager) Get(ctx context.Context, id string) (*Download, error) {
 func (m *Manager) foldLiveProgress(d *Download) {
 	m.mu.Lock()
 	prog := m.live[d.ID]
+	if rs := m.rates[d.ID]; rs != nil {
+		d.SpeedBps = rs.bps // live rate for an active job; left zero otherwise
+	}
 	m.mu.Unlock()
 	if prog == nil || len(prog.completed) < len(d.Segments) {
 		return
@@ -646,6 +661,7 @@ func (m *Manager) trackProgress(id string, prog *segProgress) {
 func (m *Manager) untrackProgress(id string) {
 	m.mu.Lock()
 	delete(m.live, id)
+	delete(m.rates, id) // a finished job reports no rate
 	m.mu.Unlock()
 }
 

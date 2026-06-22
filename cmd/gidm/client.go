@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 )
 
 // errDaemonNotRunning is returned when the socket is absent or refuses the

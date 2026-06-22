@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/K-RED90/gidm/api"
 	cli "github.com/K-RED90/gidm/cmd/gidm"
-	"github.com/K-RED90/gidm/internal/api"
 	"github.com/K-RED90/gidm/internal/apiserver"
 	"github.com/K-RED90/gidm/internal/config"
 	"github.com/K-RED90/gidm/internal/engine"
@@ -28,7 +28,7 @@ import (
 // testHarness owns a real in-process gidmd: an httptest range-file server, the
 // production httpx -> httpfetch -> sqlite -> engine -> Manager -> apiserver chain
 // wired to a unix socket. Tests drive the CLI's exported Run seam against it. The
-// CLI itself imports only internal/api + internal/config (asserted by
+// CLI itself imports only api + internal/config (asserted by
 // deps_test.go); the heavy stack lives only here in the external test package.
 type testHarness struct {
 	sock    string

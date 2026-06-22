@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/K-RED90/gidm/internal/api"
+	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/config"
 )
 

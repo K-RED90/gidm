@@ -7,7 +7,7 @@ import (
 )
 
 // TestNoForbiddenImports is the critical acceptance gate: the CLI must drive the
-// daemon over the socket using internal/api only and must never transitively pull
+// daemon over the socket using the api package only and must never transitively pull
 // in the engine, store, HTTP, or apiserver layers. It shells out to
 // `go list -deps` WITHOUT the -test flag, so the external main_test package's
 // heavy imports (which spin up a real gidmd) are excluded and do not trip it.
