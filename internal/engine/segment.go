@@ -68,8 +68,14 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 			break // fully fetched between attempts (or the tail was stolen away)
 		}
 
-		body, err := e.fetcher.RangeGet(ctx, dl.URL, from, end)
+		// The attempt runs under a child context the stall watchdog can cancel
+		// independently of a parent pause/shutdown. RangeGet takes it too, so the
+		// body read it returns is bound to the same context and a stall cancel
+		// unblocks a wedged read.
+		attemptCtx, cancelAttempt := context.WithCancel(ctx)
+		body, err := e.fetcher.RangeGet(attemptCtx, dl.URL, from, end)
 		if err != nil {
+			cancelAttempt()
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -77,10 +83,17 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 			continue
 		}
 
-		err = e.streamInto(ctx, body, part, from, dl, idx, prog, plan, start, buf, limiter)
+		watch := startStallWatch(cancelAttempt, prog, idx, e.cfg.StallTimeout.Duration())
+		err = e.streamInto(attemptCtx, body, part, from, dl, idx, prog, plan, start, buf, limiter)
+		watch.stop()
 		_ = body.Close()
+		cancelAttempt()
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return ctx.Err() // parent cancelled: pause, shutdown, or a sibling's error
+		}
+		if watch.stalled.Load() {
+			lastErr = errStalled // dead-but-open connection; reconnect on the next attempt
+			continue
 		}
 		if errors.Is(err, errSegmentStolen) {
 			// Filled up to the live End. Confirm under the coordinator lock: a real
@@ -167,8 +180,10 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 		}
 		prog.store(0, 0)
 
-		body, err := e.fetcher.Get(ctx, dl.URL)
+		attemptCtx, cancelAttempt := context.WithCancel(ctx)
+		body, err := e.fetcher.Get(attemptCtx, dl.URL)
 		if err != nil {
+			cancelAttempt()
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -176,10 +191,17 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 			continue
 		}
 
-		err = e.streamInto(ctx, body, part, 0, dl, 0, prog, nil, 0, buf, limiter)
+		watch := startStallWatch(cancelAttempt, prog, 0, e.cfg.StallTimeout.Duration())
+		err = e.streamInto(attemptCtx, body, part, 0, dl, 0, prog, nil, 0, buf, limiter)
+		watch.stop()
 		_ = body.Close()
+		cancelAttempt()
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if watch.stalled.Load() {
+			lastErr = errStalled
+			continue
 		}
 		if err != nil {
 			lastErr = err

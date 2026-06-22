@@ -18,6 +18,7 @@ buffer_size           = 65536   # per-read copy buffer, bytes (pooled per worker
 timeout               = "30s"   # per-request timeout
 max_retries           = 5
 retry_backoff         = "2s"    # base backoff, grows exponentially
+stall_timeout         = "30s"   # drop+retry a segment with no bytes for this long (dead-but-open socket); 0 = off
 work_stealing         = true    # fast workers absorb a straggler's tail by splitting it mid-flight
 max_segments          = 64      # ceiling on live segments after work-stealing splits
 min_steal_size        = 1048576 # don't split a remainder below this many bytes (1 MiB)
@@ -27,9 +28,15 @@ rate_burst            = 0       # token-bucket capacity, bytes; 0 = derive from 
 default_priority      = "normal" # priority for new downloads when none is given: low | normal | high
 
 [network]
-proxy_url       = ""            # e.g. "http://127.0.0.1:8080"; empty = none
-user_agent      = "gidm/0.1 (+https://github.com/K-RED90/gidm)"
-tls_skip_verify = false         # insecure; leave false unless you must
+proxy_url          = ""         # e.g. "http://127.0.0.1:8080"; empty = none
+user_agent         = "gidm/0.1 (+https://github.com/K-RED90/gidm)"
+tls_skip_verify    = false      # insecure; leave false unless you must
+http2              = false      # false forces HTTP/1.1 so each segment is its own TCP connection
+                                # (an HTTP/2 origin multiplexes all segments onto one, sharing one
+                                # rate limit/congestion window); enable only for HTTP/2-only origins
+socket_buffer_size = 131072     # transport read/write buffer, bytes (fewer syscalls on fast links); 0 = net/http default
+tcp_recv_buf       = 0          # SO_RCVBUF per connection, bytes; 0 = OS default (Linux auto-tunes; set on macOS/Windows)
+tcp_send_buf       = 0          # SO_SNDBUF per connection, bytes; 0 = OS default
 
 [storage]
 db_path = ""                    # empty = <data dir>/gidm.db

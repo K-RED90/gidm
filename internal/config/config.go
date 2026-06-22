@@ -45,6 +45,14 @@ type Download struct {
 	MaxSegments  int  `toml:"max_segments"`
 	MinStealSize int  `toml:"min_steal_size"`
 
+	// StallTimeout drops and retries a segment whose connection delivers no bytes
+	// for this long: a dead-but-open socket (no RST) otherwise hangs until TCP
+	// keep-alive notices, which can take minutes. The retry reconnects on a fresh
+	// connection. 0 disables the watchdog (rely only on keep-alive). Make it
+	// generous — a connection slower than one buffer per StallTimeout is treated
+	// as dead — so genuinely slow links are not killed.
+	StallTimeout Duration `toml:"stall_timeout"`
+
 	// MaxRate caps total download bandwidth across all downloads (bytes/sec); 0 =
 	// unlimited. PerDownloadMaxRate caps each individual download the same way.
 	// RateBurst overrides the token-bucket capacity (bytes); 0 derives it from the
@@ -63,6 +71,29 @@ type Network struct {
 	ProxyURL      string `toml:"proxy_url"`
 	UserAgent     string `toml:"user_agent"`
 	TLSSkipVerify bool   `toml:"tls_skip_verify"`
+
+	// HTTP2 lets the download transport negotiate HTTP/2. It defaults to false on
+	// purpose: a segmented download wants N independent TCP connections (each with
+	// its own congestion window, so one slow stream never caps the link and a
+	// per-connection server rate limit is beaten N times over), but an HTTP/2
+	// origin multiplexes every segment onto a single connection — one window, one
+	// rate limit — which erases the benefit of segmentation. Enable it only for
+	// origins that require HTTP/2.
+	HTTP2 bool `toml:"http2"`
+
+	// SocketBufferSize sets the transport's userspace read/write buffer (bytes)
+	// for socket I/O. Larger buffers mean fewer read/write syscalls per second on
+	// a fast link; the cost is that buffer held per pooled connection. 0 keeps
+	// net/http's small (4 KiB) default.
+	SocketBufferSize int `toml:"socket_buffer_size"`
+
+	// TCPRecvBuf/TCPSendBuf set SO_RCVBUF/SO_SNDBUF on each connection (bytes). A
+	// large receive buffer lets one connection fill a high bandwidth-delay-product
+	// link (fast but distant servers). 0 leaves the OS default — on Linux the
+	// kernel auto-tunes the window and a fixed size *disables* that, so this is an
+	// opt-in knob most useful on macOS/Windows where auto-tuning is weaker.
+	TCPRecvBuf int `toml:"tcp_recv_buf"`
+	TCPSendBuf int `toml:"tcp_send_buf"`
 }
 
 type Storage struct {
@@ -110,9 +141,15 @@ func Default() *Config {
 			WorkStealing:        true,
 			MaxSegments:         64,
 			MinStealSize:        1 << 20, // 1 MiB
+			StallTimeout:        Duration(30 * time.Second),
 			DefaultPriority:     "normal",
 		},
-		Network: Network{UserAgent: defaultUserAgent},
+		Network: Network{
+			UserAgent: defaultUserAgent,
+			// 128 KiB: a 32x bump over net/http's 4 KiB default cuts socket
+			// syscalls on fast links while keeping per-connection memory modest.
+			SocketBufferSize: 128 * 1024,
+		},
 		Daemon: Daemon{
 			ReadTimeout:     Duration(30 * time.Second),
 			WriteTimeout:    Duration(10 * time.Second),
@@ -214,6 +251,7 @@ func applyEnv(c *Config) error {
 	boolean("GIDM_DOWNLOAD_WORK_STEALING", &c.Download.WorkStealing)
 	num("GIDM_DOWNLOAD_MAX_SEGMENTS", &c.Download.MaxSegments)
 	num("GIDM_DOWNLOAD_MIN_STEAL_SIZE", &c.Download.MinStealSize)
+	dur("GIDM_DOWNLOAD_STALL_TIMEOUT", &c.Download.StallTimeout)
 	num("GIDM_DOWNLOAD_MAX_RATE", &c.Download.MaxRate)
 	num("GIDM_DOWNLOAD_PER_DOWNLOAD_MAX_RATE", &c.Download.PerDownloadMaxRate)
 	num("GIDM_DOWNLOAD_RATE_BURST", &c.Download.RateBurst)
@@ -222,6 +260,10 @@ func applyEnv(c *Config) error {
 	str("GIDM_NETWORK_PROXY_URL", &c.Network.ProxyURL)
 	str("GIDM_NETWORK_USER_AGENT", &c.Network.UserAgent)
 	boolean("GIDM_NETWORK_TLS_SKIP_VERIFY", &c.Network.TLSSkipVerify)
+	boolean("GIDM_NETWORK_HTTP2", &c.Network.HTTP2)
+	num("GIDM_NETWORK_SOCKET_BUFFER_SIZE", &c.Network.SocketBufferSize)
+	num("GIDM_NETWORK_TCP_RECV_BUF", &c.Network.TCPRecvBuf)
+	num("GIDM_NETWORK_TCP_SEND_BUF", &c.Network.TCPSendBuf)
 
 	str("GIDM_STORAGE_DB_PATH", &c.Storage.DBPath)
 	str("GIDM_DAEMON_SOCKET_PATH", &c.Daemon.SocketPath)
@@ -273,6 +315,9 @@ func (c *Config) Validate() error {
 	if c.Download.MaxRetries < 0 {
 		errs = append(errs, errors.New("download.max_retries must be >= 0"))
 	}
+	if c.Download.StallTimeout < 0 {
+		errs = append(errs, errors.New("download.stall_timeout must be >= 0"))
+	}
 	if c.Download.WorkStealing {
 		if c.Download.MaxSegments < 1 {
 			errs = append(errs, errors.New("download.max_segments must be >= 1 when work_stealing is enabled"))
@@ -297,6 +342,15 @@ func (c *Config) Validate() error {
 	case "", "low", "normal", "high":
 	default:
 		errs = append(errs, fmt.Errorf("download.default_priority %q is invalid (want low|normal|high)", c.Download.DefaultPriority))
+	}
+	if c.Network.SocketBufferSize < 0 {
+		errs = append(errs, errors.New("network.socket_buffer_size must be >= 0"))
+	}
+	if c.Network.TCPRecvBuf < 0 {
+		errs = append(errs, errors.New("network.tcp_recv_buf must be >= 0"))
+	}
+	if c.Network.TCPSendBuf < 0 {
+		errs = append(errs, errors.New("network.tcp_send_buf must be >= 0"))
 	}
 	if c.Daemon.ReadTimeout <= 0 {
 		errs = append(errs, errors.New("daemon.read_timeout must be > 0"))
