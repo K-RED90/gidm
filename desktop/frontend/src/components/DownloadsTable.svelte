@@ -105,9 +105,7 @@
 
   function onRowDblClick(e: MouseEvent, d: DownloadView): void {
     if ((e.target as HTMLElement).closest('button')) return
-    // a finished file opens directly; anything else opens its properties.
-    if (d.status === DownloadStatus.StatusCompleted) void doOpen(d.destination)
-    else onDetails(d.id)
+    onDetails(d.id)
   }
 
   function onRowContextMenu(e: MouseEvent, d: DownloadView): void {

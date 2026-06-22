@@ -428,17 +428,15 @@
   .props {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: var(--space-2) var(--space-4);
+    gap: 0 var(--space-6);
     margin: 0;
   }
   .props > div {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     min-width: 0;
-    padding: 10px 12px;
-    background: var(--surface-3);
-    border-radius: 8px;
+    padding: var(--space-2) 0;
   }
   .props .wide {
     grid-column: 1 / -1;
@@ -599,27 +597,26 @@
     align-self: flex-start;
     border: 0;
     background: transparent;
-    padding: 0;
+    padding: 2px 0;
     font: inherit;
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--faint);
+    color: var(--muted);
     cursor: pointer;
   }
   .auth-head:hover {
     color: var(--text);
   }
+  .auth-head :global(svg) {
+    color: var(--faint);
+  }
   .auth-head .badge {
-    text-transform: none;
-    letter-spacing: 0;
     font-size: var(--text-xs);
     font-weight: 600;
     color: var(--accent);
     background: var(--accent-soft);
     border-radius: 999px;
-    padding: 0 var(--space-2);
+    padding: 1px var(--space-2);
   }
   .auth-body {
     display: flex;
@@ -634,26 +631,24 @@
   .afield {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-2);
     min-width: 0;
   }
   .alabel {
     font-size: var(--text-xs);
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--faint);
+    color: var(--muted);
   }
   .ainput {
     width: 100%;
     min-width: 0;
-    height: 34px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
+    height: 38px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--surface-2);
     color: var(--text);
     font: inherit;
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
     padding: 0 var(--space-3);
   }
   .ainput::placeholder {
@@ -666,11 +661,11 @@
   }
   .ainput.mono {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
   }
   .ainput.area {
     height: auto;
-    min-height: 48px;
+    min-height: 56px;
     padding: var(--space-2) var(--space-3);
     resize: vertical;
     line-height: 1.5;
