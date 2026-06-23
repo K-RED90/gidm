@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"runtime/debug"
 
 	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/internal/engine"
@@ -16,6 +17,18 @@ import (
 // by toResponse; the full error is logged there, never sent to the client.
 func (s *Server) dispatch(ctx context.Context, req *api.Request) (resp api.Response, verb, id string) {
 	verb = string(req.Op)
+
+	// A panic in any Manager call would otherwise unwind through the handler
+	// goroutine and crash the whole daemon, taking every in-flight download with
+	// it. Contain it to this one request: log the panic and stack, and answer with
+	// the same generic internal error toResponse uses, so the client never sees
+	// internals and the daemon keeps serving.
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("apiserver: handler panic", "verb", verb, "panic", r, "stack", string(debug.Stack()))
+			resp = api.ErrorResponse(api.CodeInternal, "internal error")
+		}
+	}()
 
 	if req.Version != api.Version {
 		return api.ErrorResponse(api.CodeUnsupportedVersion, "unsupported protocol version %d", req.Version), verb, ""
