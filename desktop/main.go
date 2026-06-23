@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,15 +21,22 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed build/appicon.png
+//go:embed build/trayicon.png
 var trayIcon []byte
 
 const (
 	// dialTimeout bounds each daemon round-trip; the control protocol replies
 	// immediately, so a few seconds is ample.
 	dialTimeout = 10 * time.Second
-	// pollInterval is how often the UI is refreshed and notifications are checked.
-	pollInterval = time.Second
+	// pollInterval is how often the UI is refreshed, notifications are checked, and
+	// a freshly-captured download is surfaced. Kept short so a browser capture pops
+	// the window near-instantly (the daemon's Add returns before the download
+	// starts, so the only lag is one tick) and progress bars update smoothly. The
+	// snapshot is a cheap local-socket round-trip.
+	// ponytail: flat 250ms poll; if download counts get large enough that
+	// ListDownloads-per-tick shows up in a profile, switch to a daemon-pushed
+	// event stream instead of polling faster.
+	pollInterval = 250 * time.Millisecond
 	// respawnBackoff throttles auto-restart attempts while the daemon is down.
 	respawnBackoff = 15 * time.Second
 )
@@ -51,7 +59,7 @@ func main() {
 		// One window per machine; a relaunch focuses the running instance instead of
 		// opening a duplicate that would fight over the daemon.
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "com.github.k-red90.gidm",
+			UniqueID: "io.github.k_red90.gidm",
 		},
 		Services: []application.Service{
 			application.NewService(br),
@@ -98,6 +106,13 @@ func main() {
 		window.Hide()
 	})
 
+	// A capture progress pop-up can be the only visible window; this lets its
+	// "Open gidm" button surface the main manager (the pop-up emits ui:show-main).
+	app.Event.On("ui:show-main", func(*application.CustomEvent) {
+		window.Show()
+		window.Focus()
+	})
+
 	setupTray(app, window)
 
 	go pump(app, br, notifier, socket)
@@ -111,7 +126,9 @@ func main() {
 // show or quit.
 func setupTray(app *application.App, window *application.WebviewWindow) {
 	tray := app.SystemTray.New()
-	tray.SetLabel("gidm")
+	// A full-colour glyph (transparent background, padded). SetIcon — not
+	// SetTemplateIcon — so macOS keeps the brand colour instead of tinting it
+	// monochrome. No label: the icon stands alone, compact and native.
 	if len(trayIcon) > 0 {
 		tray.SetIcon(trayIcon)
 	}
@@ -134,6 +151,8 @@ func pump(app *application.App, br *bridge.Bridge, notifier *notifications.Notif
 	go func() { _, _ = notifier.RequestNotificationAuthorization() }()
 
 	prev := map[string]api.DownloadStatus{}
+	known := map[string]struct{}{}
+	seeded := false
 	var lastRespawn time.Time
 
 	t := time.NewTicker(pollInterval)
@@ -149,8 +168,86 @@ func pump(app *application.App, br *bridge.Bridge, notifier *notifications.Notif
 			continue
 		}
 		app.Event.Emit(bridge.EventDownloads, downloads)
+		surfaceNew(app, br, known, seeded, downloads)
+		seeded = true
 		notifyTransitions(notifier, prev, downloads)
 	}
+}
+
+// surfaceNew opens a floating progress window (IDM-style, separate from the main
+// manager) for any download that just appeared — a browser capture or a CLI add.
+// The first snapshot only seeds the known-set so existing downloads on launch
+// don't pop, and the desktop's own Adds are skipped so they don't double-pop.
+// known is rebuilt each tick from the current ids, so removed downloads drop out.
+func surfaceNew(app *application.App, br *bridge.Bridge, known map[string]struct{}, seeded bool, downloads []api.DownloadView) {
+	for _, id := range freshIDs(known, seeded, downloads) {
+		if br.ConsumeLocalAdd(id) {
+			continue
+		}
+		openPopup(app, id)
+	}
+}
+
+// popup window dimensions. Width is fixed; height is just the initial value —
+// the webview resizes the window to fit its content on load (ProgressPopup), so
+// this is only the brief pre-paint size and a fallback.
+const (
+	popupWidth  = 480
+	popupHeight = 300
+)
+
+// openPopup shows a small floating progress window for one download. It reuses
+// the window registry by name, so a repeat capture of the same id just refocuses
+// the existing window instead of stacking duplicates. Show/Focus marshal to the
+// main thread internally, so calling them from the pump goroutine is safe.
+func openPopup(app *application.App, id string) {
+	name := "popup:" + id
+	if w, ok := app.Window.GetByName(name); ok {
+		w.Show()
+		w.Focus()
+		return
+	}
+	w := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:          name,
+		Title:         "Download",
+		Width:         popupWidth,
+		Height:        popupHeight,
+		DisableResize: true,
+		// A fixed-size progress box: no maximise/fullscreen (both target the green
+		// zoom button on macOS), so it can't be blown up to a useless empty window.
+		MaximiseButtonState:   application.ButtonDisabled,
+		FullscreenButtonState: application.ButtonDisabled,
+		URL:                   "/?popup=" + url.QueryEscape(id),
+		Mac: application.MacWindow{
+			Backdrop: application.MacBackdropTranslucent,
+			TitleBar: application.MacTitleBarHidden,
+		},
+		// matches the frontend's --surface so the window chrome and the webview
+		// read as one panel (and there's no dark flash before the webview paints)
+		BackgroundColour: application.NewRGB(22, 22, 24),
+	})
+	w.Show()
+	w.Focus()
+}
+
+// freshIDs returns the ids in downloads not seen in known, then rebuilds known
+// from the current ids (so removed downloads drop out). The first pass
+// (seeded=false) only seeds and returns none, so downloads already present at
+// launch don't surface.
+func freshIDs(known map[string]struct{}, seeded bool, downloads []api.DownloadView) []string {
+	var fresh []string
+	for _, d := range downloads {
+		if _, ok := known[d.ID]; !ok && seeded {
+			fresh = append(fresh, d.ID)
+		}
+	}
+	for id := range known {
+		delete(known, id)
+	}
+	for _, d := range downloads {
+		known[d.ID] = struct{}{}
+	}
+	return fresh
 }
 
 // notifyTransitions fires a native notification when a download newly reaches a

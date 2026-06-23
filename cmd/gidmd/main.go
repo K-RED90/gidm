@@ -21,6 +21,9 @@ import (
 	"github.com/K-RED90/gidm/internal/store/sqlite"
 )
 
+// version is stamped at build time via -ldflags "-X main.version=...".
+var version = "0.1.0-dev"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "gidmd:", err)
@@ -33,8 +36,13 @@ func run(args []string) error {
 	configPath := fs.String("config", "", "config file path (overrides $GIDM_CONFIG)")
 	logLevel := fs.String("log-level", "", "log level override: debug|info|warn|error")
 	socket := fs.String("socket", "", "unix socket path override")
+	showVersion := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *showVersion {
+		fmt.Println("gidmd", version)
+		return nil
 	}
 
 	var (

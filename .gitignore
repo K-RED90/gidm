@@ -1,5 +1,9 @@
 # Binaries & build output
 /bin/
+# stray root-level binaries from `go build ./cmd/...` without -o
+/gidm
+/gidmd
+/gidm-host
 *.exe
 *.test
 *.out

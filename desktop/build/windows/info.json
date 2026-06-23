@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A gidm-desktop application",
-			"LegalCopyright": "© 2026, My Company",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"CompanyName": "gidm",
+			"FileDescription": "Open-source download accelerator — segmented, parallel downloads.",
+			"LegalCopyright": "© 2026 gidm contributors. Apache-2.0 licensed.",
+			"ProductName": "gidm",
+			"Comments": "https://github.com/K-RED90/gidm"
 		}
 	}
 }

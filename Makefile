@@ -3,6 +3,11 @@ BIN_DIR ?= bin
 PKGS    ?= ./...
 LDFLAGS ?= -s -w
 
+# Stamp a real version into the gidm/gidmd binaries (read by their `--version`
+# flag). Defaults to the git tag/commit; override with `make build VERSION=v1.2.3`.
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VLDFLAGS := $(LDFLAGS) -X main.version=$(VERSION)
+
 # NOWORK keeps the core module's build/test/lint/vuln independent of the desktop
 # Wails module that go.work adds: the pure-Go, no-CGO core is never dragged
 # through the CGO/webview desktop tree (e.g. on CI runners without a webview
@@ -16,8 +21,8 @@ NOWORK  := GOWORK=off
 all: build
 
 build:
-	$(NOWORK) $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/gidmd     ./cmd/gidmd
-	$(NOWORK) $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/gidm      ./cmd/gidm
+	$(NOWORK) $(GO) build -ldflags="$(VLDFLAGS)" -o $(BIN_DIR)/gidmd     ./cmd/gidmd
+	$(NOWORK) $(GO) build -ldflags="$(VLDFLAGS)" -o $(BIN_DIR)/gidm      ./cmd/gidm
 	$(NOWORK) $(GO) build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/gidm-host ./cmd/gidm-host
 
 test:

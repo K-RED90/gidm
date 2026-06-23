@@ -9,6 +9,7 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 func TestValidateSetConfig(t *testing.T) {
+	absDir := t.TempDir() // always absolute and clean on all platforms
 	tests := []struct {
 		name    string
 		sc      SetConfig
@@ -16,7 +17,7 @@ func TestValidateSetConfig(t *testing.T) {
 	}{
 		{"empty patch ok", SetConfig{}, nil},
 		{"full valid", SetConfig{
-			DownloadDir:         ptr("/srv/dl"),
+			DownloadDir:         ptr(absDir),
 			SegmentsPerDownload: ptr(8),
 			DefaultPriority:     ptr(PriorityHigh),
 			MaxRate:             ptr(1 << 20),

@@ -329,8 +329,7 @@
               {/if}
             </td>
             <td class="col-status">
-              <span class="status">
-                <i class="dot {d.status}"></i>
+              <span class="status {d.status}">
                 {STATUS_LABEL[d.status] ?? d.status}
               </span>
             </td>
@@ -666,47 +665,11 @@
     font-weight: 500;
     color: var(--muted);
   }
-  .dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--faint);
-    flex: none;
-  }
-  .dot.active {
-    background: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-    animation: pulse 1.8s ease-in-out infinite;
-  }
-  .dot.completed {
-    background: var(--success);
-  }
-  .dot.failed {
-    background: var(--danger);
-  }
-  .dot.paused {
-    background: var(--warning);
-  }
-  .status:has(.dot.active) {
+  .status.active {
     color: var(--text);
   }
-  .status:has(.dot.failed) {
+  .status.failed {
     color: var(--danger);
-  }
-  @keyframes pulse {
-    0%,
-    100% {
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
-    }
-    50% {
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 6%, transparent);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .dot.active {
-      animation: none;
-    }
   }
 
   /* Row actions: transparent until the row is hovered/focused — no permanent
