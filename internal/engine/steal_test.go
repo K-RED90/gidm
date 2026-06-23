@@ -418,10 +418,9 @@ func (nopWriter) Write(b []byte) (int, error) { return len(b), nil }
 func TestProgressWriterWriteZeroAllocsStealing(t *testing.T) {
 	seg := []Segment{{Index: 0, Start: 0, End: 1 << 62}}
 	pw := &progressWriter{
-		dst:       nopWriter{},
-		prog:      newSegProgressSized(seg, 1),
-		plan:      newLivePlan(seg, 1),
-		nextFlush: time.Now().Add(time.Hour), // never checkpoint during the run
+		dst:  nopWriter{},
+		prog: newSegProgressSized(seg, 1),
+		plan: newLivePlan(seg, 1),
 	}
 	buf := make([]byte, 64*1024)
 	allocs := testing.AllocsPerRun(200, func() {
@@ -437,10 +436,9 @@ func TestProgressWriterWriteZeroAllocsStealing(t *testing.T) {
 func BenchmarkProgressWriterWriteStealing(b *testing.B) {
 	seg := []Segment{{Index: 0, Start: 0, End: 1 << 62}}
 	pw := &progressWriter{
-		dst:       nopWriter{},
-		prog:      newSegProgressSized(seg, 1),
-		plan:      newLivePlan(seg, 1),
-		nextFlush: time.Now().Add(time.Hour),
+		dst:  nopWriter{},
+		prog: newSegProgressSized(seg, 1),
+		plan: newLivePlan(seg, 1),
 	}
 	buf := make([]byte, 64*1024)
 	b.SetBytes(int64(len(buf)))

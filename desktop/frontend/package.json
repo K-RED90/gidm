@@ -1,7 +1,7 @@
 {
-  "name": "frontend",
+  "name": "gidm-desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,10 +11,10 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@wailsio/runtime": "latest",
-    "playwright": "^1.61.0"
+    "@wailsio/runtime": "latest"
   },
   "devDependencies": {
+    "playwright": "^1.61.0",
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@tsconfig/svelte": "^5.0.8",
     "svelte": "^5.46.4",

@@ -559,3 +559,29 @@ func TestOversizedRequestRejected(t *testing.T) {
 		t.Fatalf("server died after oversized input")
 	}
 }
+
+// panicManager panics on List so a test can prove a handler panic is contained to
+// one request rather than crashing the daemon. Every other verb is delegated to
+// the embedded fakeManager.
+type panicManager struct{ *fakeManager }
+
+func (panicManager) List(context.Context) ([]*engine.Download, error) {
+	panic("boom in List handler")
+}
+
+// TestHandlerPanicDoesNotCrashDaemon drives a verb whose Manager call panics and
+// asserts the client receives a generic internal error and the daemon keeps
+// serving — an unrecovered handler panic would otherwise take down the process.
+func TestHandlerPanicDoesNotCrashDaemon(t *testing.T) {
+	_, sock := startServer(t, panicManager{newFakeManager()})
+
+	resp := roundTrip(t, sock, api.NewListRequest())
+	if resp.OK || resp.Error == nil || resp.Error.Code != api.CodeInternal {
+		t.Fatalf("panicking handler: got %+v, want internal error", resp)
+	}
+
+	// The daemon survived: a fresh request on a new connection still succeeds.
+	if r := roundTrip(t, sock, api.NewPingRequest()); !r.OK {
+		t.Fatalf("server died after handler panic: %+v", r)
+	}
+}

@@ -1,0 +1,9 @@
+<svg width="44" height="44" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+  <!-- Menu-bar icon: a padded, full-colour bolt on a transparent background.
+       Used via SetIcon (NOT a template image) so the brand colour is preserved
+       instead of being flattened to monochrome. A flat fill (not the app icon's
+       gradient) keeps it crisp at ~16px, where a gradient is imperceptible. -->
+  <g transform="translate(3.81, 3.67) scale(0.035519)">
+    <path d="M578 150 L342 590 L488 590 L412 882 L682 500 L530 500 Z" fill="#fb923c"/>
+  </g>
+</svg>

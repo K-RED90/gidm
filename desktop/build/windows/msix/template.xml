@@ -10,27 +10,27 @@
     <Installer
         Path="gidm-desktop"
         Arguments=""
-        InstallLocation="C:\Program Files\My Company\My Product">
+        InstallLocation="C:\Program Files\gidm">
     </Installer>
     <PackageInformation
-        PackageName="My Product"
-        PackageDisplayName="My Product"
-        PublisherName="CN=My Company"
-        PublisherDisplayName="My Company"
+        PackageName="gidm"
+        PackageDisplayName="gidm"
+        PublisherName="CN=gidm"
+        PublisherDisplayName="gidm"
         Version="0.1.0.0"
-        PackageDescription="A gidm-desktop application">
+        PackageDescription="Open-source download accelerator — segmented, parallel downloads.">
         <Capabilities>
             <Capability Name="runFullTrust" />
-            
+
         </Capabilities>
         <Applications>
             <Application
-                Id="com.example.gidmdesktop"
-                Description="A gidm-desktop application"
-                DisplayName="My Product"
+                Id="gidm"
+                Description="Open-source download accelerator — segmented, parallel downloads."
+                DisplayName="gidm"
                 ExecutableName="gidm-desktop"
                 EntryPoint="Windows.FullTrustApplication">
-                
+
             </Application>
         </Applications>
         <Resources>
@@ -41,9 +41,9 @@
         </Dependencies>
         <Properties>
             <Framework>false</Framework>
-            <DisplayName>My Product</DisplayName>
-            <PublisherDisplayName>My Company</PublisherDisplayName>
-            <Description>A gidm-desktop application</Description>
+            <DisplayName>gidm</DisplayName>
+            <PublisherDisplayName>gidm</PublisherDisplayName>
+            <Description>Open-source download accelerator — segmented, parallel downloads.</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>

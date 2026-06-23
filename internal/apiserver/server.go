@@ -115,6 +115,16 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.cancel = cancel
 	s.mu.Unlock()
 
+	return s.acceptLoop(baseCtx, l)
+}
+
+// acceptLoop accepts connections until the listener is closed or baseCtx is
+// cancelled, dispatching each to a handler goroutine. A transient Accept error
+// (e.g. EMFILE under fd exhaustion) is retried with a capped exponential backoff
+// so a persistent failure cannot spin the loop hot; the delay resets on a clean
+// accept. Mirrors net/http.Server.Serve.
+func (s *Server) acceptLoop(baseCtx context.Context, l net.Listener) error {
+	var delay time.Duration
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -126,9 +136,16 @@ func (s *Server) Serve(ctx context.Context) error {
 			if baseCtx.Err() != nil {
 				return nil
 			}
-			s.logger.Warn("apiserver: accept failed", "err", err)
+			delay = nextAcceptDelay(delay)
+			s.logger.Warn("apiserver: accept failed", "err", err, "retry_in", delay)
+			select {
+			case <-time.After(delay):
+			case <-baseCtx.Done():
+				return nil
+			}
 			continue
 		}
+		delay = 0
 		// Register the connection under mu, but only if Close has not begun shutting
 		// down: that orders every conns.Add before Close's conns.Wait (they share mu),
 		// so a connection accepted in the same instant Close fires cannot race the
@@ -144,6 +161,22 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.mu.Unlock()
 		go s.handleConn(baseCtx, conn)
 	}
+}
+
+// nextAcceptDelay grows the accept-retry backoff: 5ms on the first error, then
+// doubling, capped at 1s.
+func nextAcceptDelay(d time.Duration) time.Duration {
+	const (
+		baseDelay = 5 * time.Millisecond
+		maxDelay  = time.Second
+	)
+	if d == 0 {
+		return baseDelay
+	}
+	if d *= 2; d > maxDelay {
+		return maxDelay
+	}
+	return d
 }
 
 // Close stops accepting, cancels in-flight handler contexts, waits (bounded by

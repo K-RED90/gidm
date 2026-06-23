@@ -199,6 +199,15 @@ func (c *stealCoord) settled(idx int, completed int64) bool {
 	return completed >= c.plan.ends[idx].Load()-c.plan.starts[idx]+1
 }
 
+// activeCount reports the number of activated slots under the lock, so the
+// checkpoint barrier (a cold-path reader) never observes a half-activated slot
+// racing trySteal's c.active++.
+func (c *stealCoord) activeCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.active
+}
+
 // activeSegments rebuilds the durable segment slice from the live plan once all
 // workers have stopped (no concurrency), so verifyComplete and the persisted record
 // reflect the final post-steal layout. Index i pairs with slot i because slots are

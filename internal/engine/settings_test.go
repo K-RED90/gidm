@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/K-RED90/gidm/internal/config"
 )
@@ -143,7 +142,6 @@ func TestProgressWriterObservesLiveGlobalSwap(t *testing.T) {
 		prog:          newSegProgressSized(seg, 1),
 		plan:          newLivePlan(seg, 1),
 		globalLimiter: &holder,
-		nextFlush:     time.Now().Add(time.Hour),
 	}
 	buf := make([]byte, 1000)
 	if _, err := pw.Write(buf); err != nil {

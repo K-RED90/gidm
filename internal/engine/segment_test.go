@@ -22,8 +22,8 @@ func (c ctxAwareStore) UpdateSegment(ctx context.Context, id string, seg Segment
 // TestCheckpointSurvivesParentCancel is the root-cause regression: a checkpoint
 // fired with an already-cancelled run context must still persist. Before the
 // fix the write inherited the cancelled context (UpdateSegment errored and, with
-// the real sqlite store, could wedge a pooled connection); now it runs on a
-// context detached from cancellation.
+// the real sqlite store, could wedge a pooled connection); now the checkpointer's
+// persist runs on a context detached from cancellation.
 func TestCheckpointSurvivesParentCancel(t *testing.T) {
 	t.Parallel()
 
@@ -47,16 +47,15 @@ func TestCheckpointSurvivesParentCancel(t *testing.T) {
 		t.Fatal("control: UpdateSegment with cancelled ctx = nil, want error")
 	}
 
-	pw := &progressWriter{
-		ctx:        cancelled, // the run context is already cancelled
-		prog:       prog,
-		segs:       segs,
-		idx:        0,
-		base:       0,
+	cp := &checkpointer{
+		file:       nopSyncer{}, // fsync is irrelevant here; exercise the persist detach
 		store:      store,
 		downloadID: "dl",
+		ctx:        cancelled, // the run context is already cancelled
+		segView:    func(i int) Segment { return prog.segmentAt(segs, i) },
+		activeN:    func() int { return len(segs) },
 	}
-	pw.checkpoint(true)
+	cp.flushFinal(0)
 
 	got, err := store.LoadDownload(context.Background(), "dl")
 	if err != nil {
