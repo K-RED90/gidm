@@ -160,6 +160,11 @@ func (e *Engine) transfer(ctx context.Context, dl *Download, fresh bool) (*Downl
 	runErr := e.runSegments(ctx, dl, part, prog, limiter)
 
 	if runErr != nil {
+		// Durable-order the failed snapshot before persisting it: finishFailed writes
+		// live counters that can sit up to a barrier interval ahead of the last fsync,
+		// and reconcileProgress can't re-clamp them (the .part is full-size). fsync
+		// first so a resume never trusts bytes a crash could drop from the page cache.
+		_ = part.Sync()
 		_ = part.Close()
 		return e.finishFailed(ctx, dl, prog, runErr)
 	}
@@ -385,6 +390,20 @@ func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, pro
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
+	// Run-level durability barrier: one fsync per interval, then persist each
+	// segment's live counter. Ranges are immutable here, so the durable shape comes
+	// straight from dl.Segments.
+	cp := &checkpointer{
+		file:       part,
+		store:      e.store,
+		downloadID: dl.ID,
+		ctx:        runCtx,
+		segView:    func(i int) Segment { return prog.segmentAt(dl.Segments, i) },
+		activeN:    func() int { return len(dl.Segments) },
+	}
+	stopBarrier := startCheckpointer(cp)
+	defer stopBarrier()
+
 	sem := make(chan struct{}, segLimit(e.segmentsFor(dl)))
 
 	var (
@@ -417,7 +436,7 @@ func (e *Engine) runStatic(ctx context.Context, dl *Download, part *os.File, pro
 		go func(idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := e.runSegment(runCtx, dl, idx, part, prog, nil, limiter); err != nil {
+			if err := e.runSegment(runCtx, dl, idx, part, prog, nil, limiter, cp); err != nil {
 				fail(err)
 			}
 		}(i) // nil coord: static, immutable ranges
@@ -453,6 +472,23 @@ func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, p
 	margin := int64(e.cfg.BufferSize)
 	coord := newStealCoord(plan, prog, n, maxSlots, e.stealFloor(), margin)
 
+	// Run-level durability barrier: one fsync per interval, then persist each active
+	// slot's live counter. segView reads the live plan (the End may have shrunk under
+	// a steal), exactly as the old per-segment checkpoint did; activeN reads the slot
+	// count under coord.mu so a freshly-activated tail is never half-observed.
+	cp := &checkpointer{
+		file:       part,
+		store:      e.store,
+		downloadID: dl.ID,
+		ctx:        runCtx,
+		segView: func(i int) Segment {
+			return Segment{Index: i, Start: plan.start(i), End: plan.endLoad(i), Completed: prog.load(i)}
+		},
+		activeN: coord.activeCount,
+	}
+	stopBarrier := startCheckpointer(cp)
+	defer stopBarrier()
+
 	var (
 		wg    sync.WaitGroup
 		once  sync.Once
@@ -484,7 +520,7 @@ func (e *Engine) runStealing(ctx context.Context, dl *Download, part *os.File, p
 					_ = e.store.UpdateSegment(persistCtx, dl.ID, steal.tail)
 					pc()
 				}
-				if err := e.runSegment(runCtx, dl, idx, part, prog, coord, limiter); err != nil {
+				if err := e.runSegment(runCtx, dl, idx, part, prog, coord, limiter, cp); err != nil {
 					fail(err)
 					return
 				}
