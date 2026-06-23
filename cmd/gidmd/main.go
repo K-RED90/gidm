@@ -100,7 +100,11 @@ func serve(cfg *config.Config, log *slog.Logger) error {
 
 	store, err := sqlite.New(cfg.Storage.DBPath, sqlite.WithVault(vault))
 	if err != nil {
-		return fmt.Errorf("gidmd: open store %q: %w", cfg.Storage.DBPath, err)
+		// Make the common causes actionable: the file is usually locked by an
+		// already-running gidmd, or corrupt after an unclean shutdown. We never
+		// auto-delete it — that would silently discard the user's download history.
+		return fmt.Errorf("gidmd: open store %q (is another gidmd running, or is the database corrupt? "+
+			"stop any running daemon, or move the file aside to start fresh): %w", cfg.Storage.DBPath, err)
 	}
 	defer func() { _ = store.Close() }()
 
