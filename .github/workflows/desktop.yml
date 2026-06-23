@@ -1,14 +1,18 @@
 name: Desktop
 
-# PHASE 1: validate that the Wails desktop app builds on each OS's native webview
-# toolchain (it can't cross-compile). Triggered on this branch while iterating;
-# before merge this becomes a tag trigger that uploads to the GitHub Release.
+# Builds the Wails desktop app on each OS's native webview toolchain (it can't
+# cross-compile), bundles gidmd beside it so the app is self-contained, and
+# packages a downloadable artifact. On a version tag the artifacts are attached
+# to the GitHub Release; on the ci/desktop-release branch they're uploaded as
+# workflow artifacts so the packaging can be verified before a real release.
 on:
   push:
     branches: [ci/desktop-release]
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # attach assets to the Release on tag builds
 
 jobs:
   build:
@@ -20,7 +24,7 @@ jobs:
           - os: windows-latest
             target: windows-amd64
           - os: macos-latest
-            target: macos-arm64
+            target: darwin-arm64
           - os: ubuntu-latest
             target: linux-amd64
     runs-on: ${{ matrix.os }}
@@ -46,12 +50,69 @@ jobs:
       - name: Install Wails v3 CLI
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.105
 
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then v="${GITHUB_REF#refs/tags/}"; else v="dev-${GITHUB_SHA::7}"; fi
+          echo "TAG=$v" >> "$GITHUB_ENV"
+          echo "VER=${v#v}" >> "$GITHUB_ENV"
+
       - name: Build desktop app
         working-directory: desktop
         run: wails3 build
 
+      - name: Build gidmd (bundled beside the app)
+        shell: bash
+        env:
+          GOWORK: "off"
+          CGO_ENABLED: "0"
+        run: |
+          ext=""; [ "${{ matrix.os }}" = windows-latest ] && ext=".exe"
+          go build -trimpath -ldflags "-s -w -X main.version=${VER}" -o "desktop/bin/gidmd${ext}" ./cmd/gidmd
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $asset = "gidm-desktop_${env:VER}_windows_amd64.zip"
+          Compress-Archive -Path bin/gidm-desktop.exe, bin/gidmd.exe -DestinationPath "bin/$asset" -Force
+          "ASSET=desktop/bin/$asset" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: desktop
+        run: |
+          wails3 package
+          cp bin/gidmd bin/gidm-desktop.app/Contents/MacOS/gidmd
+          asset="gidm-desktop_${VER}_darwin_arm64.zip"
+          ditto -c -k --keepParent bin/gidm-desktop.app "bin/$asset"
+          echo "ASSET=desktop/bin/$asset" >> "$GITHUB_ENV"
+
+      - name: Package (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: desktop
+        run: |
+          asset="gidm-desktop_${VER}_linux_amd64.tar.gz"
+          tar -C bin -czf "bin/$asset" gidm-desktop gidmd
+          echo "ASSET=desktop/bin/$asset" >> "$GITHUB_ENV"
+
       - uses: actions/upload-artifact@v4
         with:
           name: gidm-desktop-${{ matrix.target }}
-          path: desktop/bin/
+          path: ${{ env.ASSET }}
           if-no-files-found: error
+
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The goreleaser release.yml creates the Release on the same tag; wait for
+        # it to exist, then upload (idempotent via --clobber).
+        run: |
+          for i in $(seq 1 30); do
+            gh release upload "$TAG" "$ASSET" --clobber && exit 0
+            echo "release not ready yet ($i/30); retrying..."; sleep 10
+          done
+          echo "gave up waiting for release $TAG" >&2; exit 1
