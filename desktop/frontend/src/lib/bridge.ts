@@ -2,7 +2,7 @@
 // only module that imports the deep bindings/ paths and the wails runtime. Every
 // component imports daemon calls, the DownloadView type, and the event helpers
 // from here, so the generated paths live in exactly one place.
-import { Clipboard, Dialogs, Events } from '@wailsio/runtime'
+import { Clipboard, Dialogs, Events, Window } from '@wailsio/runtime'
 import { Bridge } from '../../bindings/github.com/K-RED90/gidm/desktop/bridge'
 import {
   DownloadStatus,
@@ -19,6 +19,25 @@ export type { DownloadView, Credentials, AuthView }
 // Clipboard is the frontend Wails runtime module, so no Go round-trip is needed.
 export async function copyText(text: string): Promise<void> {
   await Clipboard.SetText(text)
+}
+
+// closeWindow closes the window the call runs in — used by the standalone capture
+// progress pop-up to dismiss itself.
+export async function closeWindow(): Promise<void> {
+  await Window.Close()
+}
+
+// showMainWindow surfaces the main manager window (main.go listens for this), so
+// a capture pop-up — which may be the only window on screen — can always get back
+// to the app.
+export function showMainWindow(): void {
+  void Events.Emit('ui:show-main')
+}
+
+// resizeWindow sets the current window's size — used by the capture pop-up to fit
+// itself snugly to its content rather than a guessed fixed height.
+export async function resizeWindow(width: number, height: number): Promise<void> {
+  await Window.SetSize(width, height)
 }
 
 // openPath / revealPath ask the Go bridge to open a downloaded file with its

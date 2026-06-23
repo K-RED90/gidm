@@ -8,6 +8,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/K-RED90/gidm/api"
 	"github.com/K-RED90/gidm/desktop/internal/client"
@@ -24,10 +25,21 @@ const (
 // the JS promise with the daemon's human message.
 type Bridge struct {
 	client *client.Client
+	// localAdds remembers ids submitted via this desktop's own Add, so the capture
+	// pop-up (main.go) can skip them — a download the user added here shouldn't
+	// also spawn a floating progress window.
+	localAdds sync.Map // id -> struct{}
 }
 
 // New builds a Bridge over a daemon client.
 func New(c *client.Client) *Bridge { return &Bridge{client: c} }
+
+// ConsumeLocalAdd reports whether id was added via this desktop (and forgets it),
+// so the pump can tell a user's own Add from an externally-captured download.
+func (b *Bridge) ConsumeLocalAdd(id string) bool {
+	_, ok := b.localAdds.LoadAndDelete(id)
+	return ok
+}
 
 // Add submits a download and returns its new id. dir, filename, and segments are
 // optional overrides (empty string / 0 means "let the daemon decide"); auth is
@@ -50,6 +62,7 @@ func (b *Bridge) Add(url, dir, filename string, segments int, priority api.Prior
 	if !resp.OK {
 		return "", respErr(resp)
 	}
+	b.localAdds.Store(resp.Add.ID, struct{}{})
 	return resp.Add.ID, nil
 }
 
