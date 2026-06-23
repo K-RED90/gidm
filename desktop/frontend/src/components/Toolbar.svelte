@@ -164,7 +164,7 @@
     align-items: center;
     gap: var(--space-2);
     height: var(--toolbar-h);
-    padding: 0 var(--space-3) 0 84px;
+    padding: 0 var(--space-3);
     background: color-mix(in srgb, var(--surface) 88%, transparent);
     backdrop-filter: blur(24px) saturate(1.5);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
