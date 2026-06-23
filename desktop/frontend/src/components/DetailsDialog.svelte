@@ -1,12 +1,10 @@
 <script lang="ts">
   import { fade, scale } from 'svelte/transition'
   import Icon from './Icon.svelte'
-  import { Bridge, DownloadStatus, copyText, openPath, revealPath, type DownloadView } from '../lib/bridge'
+  import { DownloadStatus, copyText, openPath, revealPath, type DownloadView } from '../lib/bridge'
   import { store } from '../lib/store.svelte'
-  import { toaster, errMessage } from '../lib/toast.svelte'
   import { STATUS_LABEL } from '../lib/status'
   import { fileName, humanEta, humanSize, humanSpeed, percent } from '../lib/format'
-  import { buildCredentials, headerLines, parseHeaderLines } from '../lib/auth'
 
   // id is the download to inspect, or null when closed. The detail is derived live
   // from the store's polled snapshot, so the dialog updates every tick on its own.
@@ -40,71 +38,6 @@
   const motionMs = reduceMotion ? 0 : 150
 
   let cardEl = $state<HTMLElement>()
-
-  // --- editable authentication (IDM-style File Properties Login/Password) -------
-  // The password is never returned by the daemon (only has_password), so the field
-  // starts blank and "unchanged" means keep the stored one.
-  let showAuth = $state(false)
-  let euser = $state('')
-  let epassword = $state('')
-  let ereferer = $state('')
-  let ecookie = $state('')
-  let eheadersText = $state('')
-  let saving = $state(false)
-  // syncedId guards the reset effect so a 1s poll tick never clobbers in-progress
-  // edits — the editor re-seeds only when the dialog opens for a different download.
-  let syncedId: string | null = null
-
-  $effect(() => {
-    if (id === syncedId) return
-    syncedId = id
-    const a = d?.auth
-    euser = a?.username ?? ''
-    ereferer = a?.referer ?? ''
-    ecookie = a?.cookie ?? ''
-    eheadersText = headerLines(a?.headers)
-    epassword = ''
-    showAuth = !!a // start expanded when the download already has credentials
-  })
-
-  const hasStoredPassword = $derived(!!d?.auth?.has_password)
-  const dirty = $derived(
-    epassword !== '' ||
-      euser.trim() !== (d?.auth?.username ?? '') ||
-      ereferer.trim() !== (d?.auth?.referer ?? '') ||
-      ecookie.trim() !== (d?.auth?.cookie ?? '') ||
-      eheadersText.trim() !== headerLines(d?.auth?.headers).trim(),
-  )
-  const canRetry = $derived(
-    !!d && (d.status === DownloadStatus.StatusFailed || d.status === DownloadStatus.StatusPaused),
-  )
-
-  async function save(retry: boolean): Promise<void> {
-    if (!d || saving) return
-    saving = true
-    try {
-      const creds = buildCredentials({
-        username: euser,
-        password: epassword,
-        referer: ereferer,
-        cookie: ecookie,
-        headers: parseHeaderLines(eheadersText),
-      })
-      // Keep the stored password only when the user left the field blank and one
-      // exists; typing a new password (or clearing with none stored) replaces it.
-      const keepPassword = hasStoredPassword && epassword === ''
-      await Bridge.SetAuth(d.id, creds, keepPassword)
-      if (retry) await Bridge.Resume(d.id)
-      syncedId = null // re-seed from the freshly stored state on the next render
-      epassword = ''
-      await store.refresh()
-      toaster.success(retry ? 'Saved — retrying download' : 'Authentication saved')
-    } catch (e) {
-      toaster.error(errMessage(e))
-    } finally {
-      saving = false
-    }
-  }
 
   function fmtDate(iso: string | undefined): string {
     if (!iso) return '—'
@@ -171,7 +104,7 @@
         </div>
 
         <dl class="props">
-          <div><dt>Status</dt><dd><i class="dot {d.status}"></i>{STATUS_LABEL[d.status] ?? d.status}</dd></div>
+          <div><dt>Status</dt><dd>{STATUS_LABEL[d.status] ?? d.status}</dd></div>
           <div><dt>Size</dt><dd>{d.total_size > 0 ? humanSize(d.total_size) : 'Unknown'}</dd></div>
           <div><dt>Downloaded</dt><dd>{humanSize(d.downloaded)}{pct === null ? '' : ` (${Math.round(pct)}%)`}</dd></div>
           <div><dt>Speed</dt><dd>{humanSpeed(d.speed_bps)}</dd></div>
@@ -185,53 +118,6 @@
             <div class="wide"><dt>Checksum</dt><dd class="mono ellipsis" title={d.checksum}>{d.checksum}</dd></div>
           {/if}
         </dl>
-
-        <!-- Editable authentication (IDM File Properties: Login / Password / Referer). -->
-        <section class="auth">
-          <button
-            type="button"
-            class="auth-head"
-            aria-expanded={showAuth}
-            onclick={() => (showAuth = !showAuth)}
-          >
-            <Icon name={showAuth ? 'chevronDown' : 'chevronRight'} size={14} />
-            <span>Authentication</span>
-            {#if d.auth}<span class="badge">set</span>{/if}
-          </button>
-
-          {#if showAuth}
-            <div class="auth-body">
-              <div class="auth-row">
-                <label class="afield">
-                  <span class="alabel">Login</span>
-                  <input class="ainput" type="text" bind:value={euser} autocomplete="off" spellcheck="false" />
-                </label>
-                <label class="afield">
-                  <span class="alabel">Password</span>
-                  <input
-                    class="ainput"
-                    type="password"
-                    bind:value={epassword}
-                    placeholder={hasStoredPassword ? '•••••• (unchanged)' : ''}
-                    autocomplete="off"
-                  />
-                </label>
-              </div>
-              <label class="afield">
-                <span class="alabel">Referer</span>
-                <input class="ainput" type="text" bind:value={ereferer} placeholder="https://…" autocomplete="off" spellcheck="false" />
-              </label>
-              <label class="afield">
-                <span class="alabel">Cookie</span>
-                <input class="ainput mono" type="text" bind:value={ecookie} placeholder="name=value" autocomplete="off" spellcheck="false" />
-              </label>
-              <label class="afield">
-                <span class="alabel">Headers</span>
-                <textarea class="ainput mono area" bind:value={eheadersText} rows="2" placeholder={'X-Header: value\nOne per line'} spellcheck="false"></textarea>
-              </label>
-            </div>
-          {/if}
-        </section>
 
         {#if conns.length > 0}
           <section class="conns">
@@ -274,18 +160,7 @@
           <Icon name="copy" size={14} /> Copy URL
         </button>
         <span class="spacer"></span>
-        {#if dirty}
-          {#if canRetry}
-            <button type="button" class="ghost" disabled={saving} onclick={() => void save(true)}>
-              <Icon name="refresh" size={14} /> Save &amp; Retry
-            </button>
-          {/if}
-          <button type="button" class="primary" disabled={saving} onclick={() => void save(false)}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        {:else}
-          <button type="button" class="primary" onclick={onClose}>Close</button>
-        {/if}
+        <button type="button" class="primary" onclick={onClose}>Close</button>
       </footer>
     </div>
   </div>
@@ -467,26 +342,6 @@
     white-space: nowrap;
     display: block;
   }
-  .dot {
-    flex: none;
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--faint);
-  }
-  .dot.active {
-    background: var(--accent);
-  }
-  .dot.completed {
-    background: var(--success);
-  }
-  .dot.failed {
-    background: var(--danger);
-  }
-  .dot.paused {
-    background: var(--warning);
-  }
-
   .conns {
     display: flex;
     flex-direction: column;
@@ -582,94 +437,6 @@
     text-align: right;
   }
 
-  /* Editable authentication section */
-  .auth {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding-top: var(--space-2);
-    border-top: 1px solid var(--border);
-  }
-  .auth-head {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    align-self: flex-start;
-    border: 0;
-    background: transparent;
-    padding: 2px 0;
-    font: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--muted);
-    cursor: pointer;
-  }
-  .auth-head:hover {
-    color: var(--text);
-  }
-  .auth-head :global(svg) {
-    color: var(--faint);
-  }
-  .auth-head .badge {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--accent);
-    background: var(--accent-soft);
-    border-radius: 999px;
-    padding: 1px var(--space-2);
-  }
-  .auth-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-  .auth-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-3);
-  }
-  .afield {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    min-width: 0;
-  }
-  .alabel {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--muted);
-  }
-  .ainput {
-    width: 100%;
-    min-width: 0;
-    height: 38px;
-    border: 1px solid var(--border-strong);
-    border-radius: 10px;
-    background: var(--surface-2);
-    color: var(--text);
-    font: inherit;
-    font-size: var(--text-md);
-    padding: 0 var(--space-3);
-  }
-  .ainput::placeholder {
-    color: var(--faint);
-  }
-  .ainput:focus {
-    outline: 0;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  .ainput.mono {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-  }
-  .ainput.area {
-    height: auto;
-    min-height: 56px;
-    padding: var(--space-2) var(--space-3);
-    resize: vertical;
-    line-height: 1.5;
-  }
   .foot button:disabled {
     opacity: 0.5;
     cursor: default;
