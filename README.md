@@ -15,18 +15,18 @@ runs on macOS, Linux, and Windows.
 
 ## Features
 
-- **⚡ Faster downloads.** Every file is split into byte ranges fetched
+- **Faster downloads.** Every file is split into byte ranges fetched
   concurrently over separate connections, so one slow stream never caps your
   bandwidth — and fast workers steal a straggler's leftover ranges instead of
   waiting.
-- **⏸ Resume, pause & retry.** Interrupted transfers pick up where they left
-  off; progress is checkpointed and failed segments retry automatically.
-- **🧩 Browser capture.** A Chrome extension hands your browser's downloads —
-  even ones behind buttons, JS, or cookie/referer-gated links — to gidm to
+- **Resume, pause & retry.** Interrupted transfers pick up where they left off;
+  progress is checkpointed and failed segments retry automatically.
+- **Browser capture.** A Chrome extension hands your browser's downloads — even
+  ones behind buttons, JS, or cookie/referer-gated links — to gidm to
   accelerate.
-- **🎚 Control it.** Per-download rate limits and scheduling, driven over a
-  local daemon by a scriptable CLI (a desktop GUI is in progress).
-- **📦 Single binary.** Pure Go, no CGO — download one file and run it.
+- **Rate limits & scheduling.** Per-download throttling and scheduling, driven
+  over a local daemon by a scriptable CLI (a desktop GUI is in progress).
+- **Single binary.** Pure Go, no CGO — download one file and run it.
 
 ## Install
 
