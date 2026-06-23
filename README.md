@@ -62,6 +62,22 @@ Override with `$env:GIDM_BIN_DIR`, or pin a version with `$env:GIDM_VERSION`.
 Both installers resolve the latest version for you — there's no release number to
 look up or paste.
 
+### Desktop app (GUI)
+
+Prefer a window over the terminal? Download the desktop app for your OS from the
+[latest release][releases] — it bundles the daemon, so it's self-contained:
+
+| OS | Asset | Run |
+|----|-------|-----|
+| Windows | `gidm-desktop_<ver>_windows_amd64.zip` | unzip, run `gidm-desktop.exe` (needs the [WebView2 runtime][webview2], preinstalled on Windows 11) |
+| macOS | `gidm-desktop_<ver>_darwin_arm64.zip` | unzip, move `gidm-desktop.app` to Applications; first launch: right-click → **Open** (it's unsigned) |
+| Linux | `gidm-desktop_<ver>_linux_amd64.tar.gz` | extract and run `./gidm-desktop` (needs GTK4 + WebKitGTK 6.0 installed) |
+
+[webview2]: https://developer.microsoft.com/microsoft-edge/webview2/
+
+The GUI is **early/beta** and unsigned, so the OS will warn on first run. It
+starts and talks to its own `gidmd`, so it works without the CLI installed.
+
 <details>
 <summary>Manual download</summary>
 
@@ -155,11 +171,11 @@ integrity checks, work-stealing rebalancing), per-download rate limiting and
 scheduling, a SQLite-backed history, the `gidmd` daemon, the `gidm` CLI, and the
 Chrome download-capture extension.
 
-**In progress:** a Wails v3 + Svelte desktop app — see
-[`desktop/`](desktop/README.md).
+**Beta:** a Wails v3 + Svelte desktop app, downloadable per OS (see
+[Desktop app](#desktop-app-gui)) — see [`desktop/`](desktop/README.md).
 
-**Planned:** signed desktop installers, a Chrome Web Store listing, and
-Homebrew / Scoop packages.
+**Planned:** code-signed desktop installers (`.dmg` / NSIS / AppImage), a Chrome
+Web Store listing, and Homebrew / Scoop packages.
 
 ## Development
 

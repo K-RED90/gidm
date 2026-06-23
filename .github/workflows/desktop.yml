@@ -1,13 +1,11 @@
 name: Desktop
 
 # Builds the Wails desktop app on each OS's native webview toolchain (it can't
-# cross-compile), bundles gidmd beside it so the app is self-contained, and
-# packages a downloadable artifact. On a version tag the artifacts are attached
-# to the GitHub Release; on the ci/desktop-release branch they're uploaded as
-# workflow artifacts so the packaging can be verified before a real release.
+# cross-compile), bundles gidmd beside it so the app is self-contained, packages
+# a downloadable artifact per OS, and attaches them to the GitHub Release for the
+# pushed tag. Run manually (workflow_dispatch) to rebuild without a release.
 on:
   push:
-    branches: [ci/desktop-release]
     tags: ["v*"]
   workflow_dispatch:
 
