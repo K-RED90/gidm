@@ -1,0 +1,56 @@
+# GoReleaser v2 — cross-compiles the three pure-Go binaries and publishes a
+# GitHub Release with archives + checksums on every pushed tag. No CGO (the
+# SQLite store is pure Go), so every target builds from a single Linux runner.
+# GOWORK=off keeps the build out of the separate Wails desktop module that
+# go.work joins (it needs a webview/CGO toolchain we don't have on CI).
+version: 2
+
+builds:
+  - id: gidmd
+    main: ./cmd/gidmd
+    binary: gidmd
+    env: ["CGO_ENABLED=0", "GOWORK=off"]
+    flags: ["-trimpath"]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+  - id: gidm
+    main: ./cmd/gidm
+    binary: gidm
+    env: ["CGO_ENABLED=0", "GOWORK=off"]
+    flags: ["-trimpath"]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+  - id: gidm-host
+    main: ./cmd/gidm-host
+    binary: gidm-host
+    env: ["CGO_ENABLED=0", "GOWORK=off"]
+    flags: ["-trimpath"]
+    ldflags: ["-s -w"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - ids: [gidmd, gidm, gidm-host]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [README.md, LICENSE, configs/gidm.example.toml]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:", "^ci:"]
+
+release:
+  draft: false
+  prerelease: auto
