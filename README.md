@@ -5,10 +5,10 @@ Internet Download Manager (IDM). **The goal is simple: beat IDM on download
 performance**, through segmented (parallel) downloading and a zero-allocation
 transfer path, with no CGO and a minimal, audited dependency set.
 
-> **Status: M1 — core engine (in progress).** The foundation, layered
-> configuration, the engine contracts, the SQLite store, and the HTTP layer have
-> landed. End-to-end segmented downloading is being assembled on top of them. See
-> the roadmap below.
+> **Status: M0–M3 complete; M5 (desktop app) in progress.** The engine
+> (segmented downloads, resume, retries, integrity), the SQLite store, the HTTP
+> layer, the daemon + CLI, and work-stealing segmentation have all landed. The
+> Wails + Svelte desktop app is being built on top. See the roadmap below.
 
 ## Why it's fast
 
@@ -54,7 +54,7 @@ desktop ────────────────┘
 | `internal/config` | layered configuration (defaults → file → env → flags) |
 | `internal/httpx` | ranged GETs, retry/backoff, secure bounded redirects, URL probe |
 | `internal/store/sqlite` | SQLite persistence behind `engine.Store` |
-| `internal/api` | daemon control API (M2) |
+| `api` | public daemon control API / wire protocol (M2) |
 | `cmd/gidmd` | daemon |
 | `cmd/gidm` | CLI client (`add`, `list`, `status`/`get`, `pause`, `resume`, `rm`) |
 | `cmd/gidm-host` | Chrome native-messaging host |
@@ -82,7 +82,7 @@ TOML config file → `GIDM_*` environment variables → command-line flags. Copy
 ## CLI
 
 `gidm` drives a running `gidmd` over its Unix socket — it speaks only the
-`internal/api` protocol and never links the engine, store, or HTTP layers.
+`api` protocol and never links the engine, store, or HTTP layers.
 
 ```sh
 gidmd &                         # start the daemon

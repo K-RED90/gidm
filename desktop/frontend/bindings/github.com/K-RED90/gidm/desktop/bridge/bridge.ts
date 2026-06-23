@@ -27,6 +27,14 @@ export function Add(url: string, dir: string, filename: string, segments: number
 }
 
 /**
+ * ConsumeLocalAdd reports whether id was added via this desktop (and forgets it),
+ * so the pump can tell a user's own Add from an externally-captured download.
+ */
+export function ConsumeLocalAdd(id: string): $CancellablePromise<boolean> {
+    return $Call.ByID(1390004544, id);
+}
+
+/**
  * GetConfig returns the daemon's current runtime settings (download dir, default
  * segments/priority, and the global + per-download speed caps).
  */

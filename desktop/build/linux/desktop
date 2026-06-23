@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
-Name=My Product
-Comment=A gidm-desktop application
+Name=gidm
+Comment=Open-source download accelerator — segmented, parallel downloads.
 # The Exec line includes %u to pass the URL to the application
 Exec=/usr/local/bin/gidm-desktop %u
 Terminal=false

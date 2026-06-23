@@ -37,7 +37,7 @@ const checkpointWriteTimeout = 5 * time.Second
 // which rules out a steal that was tentatively shrunk then undone; an undone steal
 // restores the End and the loop re-fetches the remainder. coord is nil for the
 // static and whole-body paths, where the segment's bounds are the immutable record.
-func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord, limiter *atomic.Pointer[rateLimiter]) error {
+func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os.File, prog *segProgress, coord *stealCoord, limiter *atomic.Pointer[rateLimiter], cp *checkpointer) error {
 	var plan *livePlan
 	if coord != nil {
 		plan = coord.plan
@@ -84,7 +84,7 @@ func (e *Engine) runSegment(ctx context.Context, dl *Download, idx int, part *os
 		}
 
 		watch := startStallWatch(cancelAttempt, prog, idx, e.cfg.StallTimeout.Duration())
-		err = e.streamInto(attemptCtx, body, part, from, dl, idx, prog, plan, start, buf, limiter)
+		err = e.streamInto(attemptCtx, body, part, from, idx, prog, plan, start, buf, limiter, cp)
 		watch.stop()
 		_ = body.Close()
 		cancelAttempt()
@@ -192,7 +192,7 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 		}
 
 		watch := startStallWatch(cancelAttempt, prog, 0, e.cfg.StallTimeout.Duration())
-		err = e.streamInto(attemptCtx, body, part, 0, dl, 0, prog, nil, 0, buf, limiter)
+		err = e.streamInto(attemptCtx, body, part, 0, 0, prog, nil, 0, buf, limiter, nil)
 		watch.stop()
 		_ = body.Close()
 		cancelAttempt()
@@ -224,12 +224,15 @@ func (e *Engine) runWholeBody(ctx context.Context, dl *Download, part *os.File, 
 }
 
 // streamInto copies body into part starting at baseOff, advancing the segment's
-// live completed counter (lock-free) and checkpointing to the store on a coarse
-// cadence (never per chunk). baseOff is segStart + already-completed bytes for a
-// ranged segment, or 0 for the whole-body fallback. plan/segStart are the
-// work-stealing handles (nil/0 on the static and whole-body paths). The copy runs
-// in copySegment so the zero-alloc benchmark covers the exact hot-path call.
-func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, dl *Download, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte, limiter *atomic.Pointer[rateLimiter]) error {
+// live completed counter (lock-free). When cp is non-nil it routes the terminal
+// per-stream persist through the run-level checkpointer (fsync-ordered) once the
+// copy ends, so a segment that finishes between barrier ticks is still durable on
+// resume; cp is nil on the whole-body fallback, which has no resumable checkpoint.
+// baseOff is segStart + already-completed bytes for a ranged segment, or 0 for the
+// whole-body fallback. plan/segStart are the work-stealing handles (nil/0 on the
+// static and whole-body paths). The copy runs in copySegment so the zero-alloc
+// benchmark covers the exact hot-path call.
+func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, baseOff int64, idx int, prog *segProgress, plan *livePlan, segStart int64, buf []byte, limiter *atomic.Pointer[rateLimiter], cp *checkpointer) error {
 	startCompleted := prog.load(idx)
 
 	tracked := &progressWriter{
@@ -238,25 +241,24 @@ func (e *Engine) streamInto(ctx context.Context, body io.Reader, part *os.File, 
 		limiter:       limiter,
 		globalLimiter: &e.globalLimiter,
 		prog:          prog,
-		segs:          dl.Segments,
 		plan:          plan,
 		start:         segStart,
 		idx:           idx,
 		base:          startCompleted,
-		store:         e.store,
-		downloadID:    dl.ID,
-		nextFlush:     time.Now().Add(checkpointInterval),
 	}
 
 	_, err := copySegment(tracked, body, buf)
-	tracked.checkpoint(true) // persist final progress for resume
+	if cp != nil {
+		cp.flushFinal(idx) // fsync-ordered terminal persist for resume
+	}
 	return err
 }
 
 // progressWriter wraps the offset writer to advance the segment's live completed
-// counter (lock-free) after each buffer flush and to checkpoint to the store on a
-// time cadence. When plan is non-nil (a work-stealing run) it also clips each flush
-// to the segment's live End so a donor never writes into a tail a thief took.
+// counter (lock-free) after each buffer flush. Persistence is not its job — the
+// run-level checkpointer owns the fsync-ordered store writes off this hot path.
+// When plan is non-nil (a work-stealing run) it also clips each flush to the
+// segment's live End so a donor never writes into a tail a thief took.
 type progressWriter struct {
 	dst io.Writer
 
@@ -271,16 +273,12 @@ type progressWriter struct {
 	limiter       *atomic.Pointer[rateLimiter]
 	globalLimiter *atomic.Pointer[rateLimiter]
 
-	prog       *segProgress
-	segs       []Segment // durable shape, used only when plan == nil
-	plan       *livePlan // live End source for a work-stealing run; nil otherwise
-	start      int64     // segment Start, for the clip math (plan runs only)
-	idx        int
-	base       int64 // completed bytes at the start of this stream
-	written    int64 // bytes written during this stream
-	store      Store
-	downloadID string
-	nextFlush  time.Time
+	prog    *segProgress
+	plan    *livePlan // live End source for a work-stealing run; nil otherwise
+	start   int64     // segment Start, for the clip math (plan runs only)
+	idx     int
+	base    int64 // completed bytes at the start of this stream
+	written int64 // bytes written during this stream
 }
 
 func (p *progressWriter) Write(b []byte) (int, error) {
@@ -335,41 +333,11 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 	n, err := p.dst.Write(b)
 	if n > 0 {
 		p.written += int64(n)
-		// Lock-free: this worker is the sole writer of its index.
+		// Lock-free: this worker is the sole writer of its index. The run-level
+		// checkpointer reads this counter to persist progress off the hot path.
 		p.prog.store(p.idx, p.base+p.written)
 	}
-	if err == nil && time.Now().After(p.nextFlush) {
-		p.checkpoint(false)
-		p.nextFlush = time.Now().Add(checkpointInterval)
-	}
 	return n, err
-}
-
-// checkpoint persists the segment's current Completed off the hot path. Errors
-// are swallowed: a failed checkpoint only costs re-downloaded bytes on resume,
-// never correctness, and must not abort an otherwise healthy transfer.
-func (p *progressWriter) checkpoint(final bool) {
-	seg := p.liveSegment()
-	if !final && seg.Completed == p.base {
-		return // nothing new since the last checkpoint
-	}
-	// Detach from the run context: a cancelled parent (a sibling's error, a
-	// pause, or shutdown) must not abort this write mid-query and leave the
-	// connection wedged. Cap it so a stuck store cannot outlive the transfer.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), checkpointWriteTimeout)
-	defer cancel()
-	_ = p.store.UpdateSegment(ctx, p.downloadID, seg)
-}
-
-// liveSegment builds the segment value to persist. On a work-stealing run it reads
-// the live plan (the End may have shrunk since planning), never the stale durable
-// slice, so a donor's checkpoint can't resurrect its pre-steal End and corrupt the
-// resumable tiling.
-func (p *progressWriter) liveSegment() Segment {
-	if p.plan != nil {
-		return Segment{Index: p.idx, Start: p.start, End: p.plan.endLoad(p.idx), Completed: p.prog.load(p.idx)}
-	}
-	return p.prog.segmentAt(p.segs, p.idx)
 }
 
 // sleepCtx waits for d, returning ctx.Err() if the context is cancelled first. A
