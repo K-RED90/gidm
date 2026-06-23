@@ -200,7 +200,6 @@ func TestProgressWriterWriteZeroAllocsLimited(t *testing.T) {
 			prog:          newSegProgressSized(seg, 1),
 			plan:          newLivePlan(seg, 1),
 			globalLimiter: limPtr(huge),
-			nextFlush:     time.Now().Add(time.Hour),
 		},
 		"both buckets": {
 			dst:           nopWriter{},
@@ -208,7 +207,6 @@ func TestProgressWriterWriteZeroAllocsLimited(t *testing.T) {
 			plan:          newLivePlan(seg, 1),
 			limiter:       limPtr(newRateLimiter(1<<50, 1<<50)),
 			globalLimiter: limPtr(huge),
-			nextFlush:     time.Now().Add(time.Hour),
 		},
 	}
 	buf := make([]byte, 64*1024)
@@ -239,7 +237,6 @@ func BenchmarkProgressWriterWriteLimited(b *testing.B) {
 		plan:          newLivePlan(seg, 1),
 		limiter:       limPtr(newRateLimiter(1<<50, 1<<50)),
 		globalLimiter: limPtr(newRateLimiter(1<<50, 1<<50)),
-		nextFlush:     time.Now().Add(time.Hour),
 	}
 	buf := make([]byte, 64*1024)
 	b.SetBytes(int64(len(buf)))
@@ -262,7 +259,6 @@ func TestProgressWriterThrottlesBothBuckets(t *testing.T) {
 		plan:          newLivePlan(seg, 1),
 		limiter:       limPtr(newRateLimiterClock(1000, 2000, dlClk)), // per-download: 1000 B/s
 		globalLimiter: limPtr(newRateLimiterClock(500, 2000, gClk)),   // global: 500 B/s
-		nextFlush:     time.Now().Add(time.Hour),
 	}
 	buf := make([]byte, 1000)
 	for range 10 { // 10_000 bytes, well past both 2000-byte bursts
