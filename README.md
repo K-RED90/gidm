@@ -8,7 +8,8 @@ transfer path, with no CGO and a minimal, audited dependency set.
 > **Status: M0–M3 complete; M5 (desktop app) in progress.** The engine
 > (segmented downloads, resume, retries, integrity), the SQLite store, the HTTP
 > layer, the daemon + CLI, and work-stealing segmentation have all landed. The
-> Wails + Svelte desktop app is being built on top. See the roadmap below.
+> CLI + daemon ship as prebuilt binaries (see [Install](#install)); the Wails +
+> Svelte desktop app is being built on top. See the roadmap below.
 
 ## Why it's fast
 
@@ -62,7 +63,43 @@ desktop ────────────────┘
 | `extensions/chrome/` | Chrome extension (M4) |
 | `configs/gidm.example.toml` | documented configuration reference |
 
+## Install
+
+Prebuilt binaries are the easy path — **no Go toolchain required**. Grab the
+archive for your OS/arch from the [latest release][releases], unpack it, and put
+`gidm` and `gidmd` on your `PATH`.
+
+[releases]: https://github.com/K-RED90/gidm/releases/latest
+
+**macOS / Linux**
+
+```sh
+# pick the asset matching your platform, e.g. gidm_<ver>_darwin_arm64.tar.gz
+tar -xzf gidm_*_*.tar.gz
+sudo mv gidm gidmd /usr/local/bin/
+gidm --version
+```
+
+On macOS the binaries are unsigned, so Gatekeeper quarantines them on first run.
+Clear it once with `xattr -d com.apple.quarantine /usr/local/bin/gidm /usr/local/bin/gidmd`.
+
+**Windows**
+
+Unzip `gidm_<ver>_windows_amd64.zip` and move `gidm.exe` / `gidmd.exe` to a
+folder on your `PATH` (or add the folder via *System → Environment Variables*).
+
+**Verify the download** (optional) against the published checksums:
+
+```sh
+sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
+```
+
+Then jump to [CLI](#cli) to start downloading.
+
 ## Build & test
+
+Building from source is only needed for development. It requires Go (the CLI and
+daemon are pure Go, no CGO); the desktop app additionally needs Bun and Wails.
 
 ```sh
 make build   # binaries into ./bin

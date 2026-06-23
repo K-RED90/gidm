@@ -1,0 +1,31 @@
+name: Release
+
+# Cuts a GitHub Release with prebuilt gidm/gidmd/gidm-host archives whenever a
+# version tag is pushed: `git tag v0.1.0 && git push origin v0.1.0`.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # GoReleaser creates the Release and uploads assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off" # keep the build out of the separate Wails desktop module
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history so the changelog can diff against the last tag
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
