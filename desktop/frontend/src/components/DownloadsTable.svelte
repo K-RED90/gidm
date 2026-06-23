@@ -365,6 +365,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    container-type: inline-size;
+    container-name: table;
   }
   table {
     width: 100%;
@@ -375,32 +377,15 @@
   }
 
   /* Column widths — single source of truth via colgroup; Name has no width and
-     absorbs the remaining space. table-layout:fixed makes header + body align.
-     Priority is narrow now that it's a glyph rather than a labelled pill. */
-  .c-sel {
-    width: 38px;
-  }
-  .c-size {
-    width: 88px;
-  }
-  .c-progress {
-    width: 200px;
-  }
-  .c-speed {
-    width: 96px;
-  }
-  .c-eta {
-    width: 70px;
-  }
-  .c-prio {
-    width: 62px;
-  }
-  .c-status {
-    width: 116px;
-  }
-  .c-actions {
-    width: 96px;
-  }
+     absorbs the remaining space. table-layout:fixed makes header + body align. */
+  .c-sel      { width: 36px; }
+  .c-size     { width: 80px; }
+  .c-progress { width: 180px; }
+  .c-speed    { width: 86px; }
+  .c-eta      { width: 66px; }
+  .c-prio     { width: 54px; }
+  .c-status   { width: 112px; }
+  .c-actions  { width: 88px; }
 
   /* Header — quiet, sentence case, a single hairline. */
   thead th {
@@ -789,18 +774,26 @@
     font-weight: 600;
   }
 
-  /* Drop the least-critical columns first as the window narrows. Hiding the
-     th/td pair is what actually collapses the column under table-layout:fixed. */
-  @media (max-width: 880px) {
-    th.col-eta,
-    td.col-eta {
-      display: none;
-    }
+  /* Progressive column shedding — keyed on the table's own container width,
+     not the viewport, since the sidebar steals space. Columns drop in order of
+     least useful at a glance. Hiding the th+td pair collapses the col under
+     table-layout:fixed. The progress bar also shrinks so the name keeps room. */
+  @container table (max-width: 760px) {
+    .c-progress { width: 150px; }
+    th.col-eta, td.col-eta { display: none; }
   }
-  @media (max-width: 780px) {
-    th.col-speed,
-    td.col-speed {
-      display: none;
-    }
+  @container table (max-width: 660px) {
+    .c-progress { width: 130px; }
+    th.col-speed, td.col-speed { display: none; }
+  }
+  @container table (max-width: 560px) {
+    .c-progress { width: 110px; }
+    .c-actions  { width: 74px; }
+    th.col-prio, td.col-prio { display: none; }
+  }
+  @container table (max-width: 460px) {
+    .c-progress { width: 90px; }
+    .c-actions  { width: 64px; }
+    th.col-size, td.col-size { display: none; }
   }
 </style>

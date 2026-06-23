@@ -70,7 +70,7 @@
     grid-template-columns: var(--sidebar-w) 1fr;
     grid-template-rows: var(--toolbar-h) 1fr;
     grid-template-areas:
-      'toolbar toolbar'
+      'sidebar toolbar'
       'sidebar main';
     height: 100vh;
     overflow: hidden;

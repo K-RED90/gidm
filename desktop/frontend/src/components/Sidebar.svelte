@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte'
+  import Logo from './Logo.svelte'
   import type { IconName } from '../lib/icons'
   import { store, type Selection } from '../lib/store.svelte'
 
@@ -26,8 +27,11 @@
   }
 </script>
 
-<aside class="sidebar">
-  <nav class="nav">
+<aside class="sidebar" style="--wails-draggable: drag">
+  <div class="brand">
+    <Logo size={18} />
+  </div>
+  <nav class="nav" style="--wails-draggable: no-drag">
     <p class="section">Status</p>
     {#each statusItems as item (item.label)}
       <button class="item" class:active={isActive(item.sel)} onclick={() => (store.selection = item.sel)}>
@@ -63,7 +67,17 @@
     min-height: 0;
     background: var(--surface);
     border-right: 1px solid var(--border);
-    padding: var(--space-3) var(--space-2) var(--space-2);
+    padding: 0 var(--space-2) var(--space-2);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    height: var(--toolbar-h);
+    flex-shrink: 0;
+    /* 80px clears the macOS traffic-light button group (3 × 12px + gaps + 12px margin) */
+    padding: 0 var(--space-3) 0 80px;
+    margin-bottom: var(--space-2);
   }
 
   .nav {
