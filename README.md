@@ -136,6 +136,19 @@ and `--timeout` override the configured socket path and client round-trip budget
 (`daemon.dial_timeout`). Exit codes: `0` ok, `2` bad request, `3` daemon not
 running, `4` timeout, `5` not found.
 
+## Browser extension
+
+A Manifest V3 Chrome extension captures browser downloads — including ones behind
+buttons/JS and cookie- or referer-gated links — and hands them to the daemon, so
+they're accelerated by gidm instead of the browser. It reaches the daemon through
+the `gidm-host` native-messaging host.
+
+It isn't on the Web Store yet, so you load it unpacked from this repo and register
+the host with one script. Full steps are in
+[`extensions/chrome/README.md`](extensions/chrome/README.md) — in short: `make
+build`, start `gidmd`, **Load unpacked** `extensions/chrome/` at
+`chrome://extensions`, then `./scripts/install-chrome-host.sh <EXTENSION_ID>`.
+
 ## Roadmap
 
 - **M0** — foundation: structure, config, tooling, CI, engine contracts ✅
