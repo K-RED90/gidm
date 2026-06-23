@@ -49,35 +49,36 @@ gidm --version
 
 [releases]: https://github.com/K-RED90/gidm/releases/latest
 
-**Windows:** download `gidm_<version>_windows_amd64.zip` from the
-[latest release][releases], unzip it, and move `gidm.exe` and `gidmd.exe` into a
-folder on your `PATH` (e.g. `%LOCALAPPDATA%\Programs\gidm`, added via *System →
-Environment Variables*).
+**Windows — one line** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/K-RED90/gidm/main/scripts/install.ps1 | iex
+```
+
+Same idea: it picks the right build from the latest release, installs `gidm.exe`
+and `gidmd.exe` to `%LOCALAPPDATA%\Programs\gidm`, and adds that to your `PATH`.
+Override with `$env:GIDM_BIN_DIR`, or pin a version with `$env:GIDM_VERSION`.
+
+Both installers resolve the latest version for you — there's no release number to
+look up or paste.
 
 <details>
-<summary>Manual download (any platform)</summary>
+<summary>Manual download</summary>
 
-Prefer to do it yourself? Grab the archive for your platform from the
-[latest release][releases] — assets are named
-`gidm_<version>_<os>_<arch>.{tar.gz,zip}`, e.g. `gidm_0.1.0_darwin_arm64.tar.gz`
-(Apple Silicon), `gidm_0.1.0_linux_amd64.tar.gz`, `gidm_0.1.0_windows_amd64.zip`
-— then unpack and place `gidm`/`gidmd` on your `PATH`:
+Don't want to pipe to a shell? Download the archive for your platform from the
+[latest release][releases] (assets are named `gidm_<version>_<os>_<arch>`, e.g.
+`gidm_…_darwin_arm64.tar.gz` for Apple Silicon, `gidm_…_windows_amd64.zip`),
+unpack it, and put `gidm`/`gidmd` on your `PATH`:
 
 ```sh
-tar -xzf gidm_*_*.tar.gz
+tar -xzf gidm_*_*.tar.gz                       # Windows: just unzip it
 sudo install -m 0755 gidm gidmd /usr/local/bin/
 ```
 
-Verify the download against the published checksums (optional):
-
-```sh
-sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
-```
-
-If you downloaded through a browser on macOS, the unsigned binaries are
-quarantined; clear it once with
-`xattr -d com.apple.quarantine /usr/local/bin/gidm /usr/local/bin/gidmd`. (The
-install script above isn't affected.)
+Optionally verify against the published checksums
+(`sha256sum -c checksums.txt`; macOS `shasum -a 256 -c`). If you downloaded
+through a browser on macOS, clear the quarantine flag once:
+`xattr -d com.apple.quarantine /usr/local/bin/gidm /usr/local/bin/gidmd`.
 
 </details>
 
